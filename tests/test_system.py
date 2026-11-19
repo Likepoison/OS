@@ -95,6 +95,18 @@ int main(void) {
             with self.assertRaisesRegex(RuntimeError, r"容器清理失败（tracetutor-[0-9a-f]+）"):
                 sandbox("int main(void){}", "", "cleanup-failure")
 
+    def test_pipe_evidence_on_held_out_cases(self):
+        source = sample(LABS["pipe"]).replace(
+            "close(fd[1]);  /* Parent write end */",
+            "int extra = dup(fd[1]); if (extra < 0) return 2; close(fd[1]);",
+        )
+        report = evaluate("pipe", source, "duplicate-write-end")
+        self.assertEqual(report["diagnosis"]["code"], "pipe_wait")
+        self.assertGreaterEqual(len(report["diagnosis"]["evidence"]), 2)
+        unknown = evaluate("pipe", "int main(void){for(;;){}}", "unrelated-timeout")
+        self.assertEqual(unknown["diagnosis"]["code"], "timeout")
+        self.assertEqual(unknown["diagnosis"]["confidence"], "insufficient")
+
     def test_compile_and_output_error(self):
         invalid = evaluate("pipe", "int main( {", "invalid")
         self.assertEqual(invalid["cases"][0]["status"], "compile_error")
