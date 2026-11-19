@@ -19,6 +19,12 @@ from labs import LABS, sample
 
 DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
+PET_ASSETS = {
+    "/pet/companion.js": "text/javascript; charset=utf-8",
+    "/pet/duck.png": "image/png",
+    "/pet/duck-walk.gif": "image/gif",
+    "/pet/duck-wave.gif": "image/gif",
+}
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
 MAX_SOURCE = 32_768
 LIMIT = 8
@@ -91,7 +97,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Security-Policy",
-                         "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                         "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; "
                          "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         if self.command != "HEAD":
@@ -104,6 +110,9 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path == "/":
             return self.send_data(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+        if url.path in PET_ASSETS:
+            return self.send_data(200, PAGE.with_name("pet").joinpath(Path(url.path).name).read_bytes(),
+                                  PET_ASSETS[url.path])
         if url.path == "/api/labs":
             return self.send_data(200, {
                 "ai": bool(os.getenv("DEEPSEEK_API_KEY")),

@@ -18,8 +18,9 @@ ERRNO = re.compile(r"^-1 ([A-Z][A-Z0-9]+)\b")
 DURATION = re.compile(r" <(\d+\.\d+)>$")
 FUTEX_WAIT = re.compile(r"[^,]+, FUTEX_WAIT(?:_BITSET)?(?:_PRIVATE)?(?:\|[^,]+)?,")
 FATAL_EXIT = re.compile(r"^\+\+\+ killed by (SIG[A-Z0-9]+)(?: \(core dumped\))? \+\+\+$")
-TEMP_FD = re.compile(r'^(\d+)<(/tmp/[^>]+)>(?:,|$)')
+FILE_FD = re.compile(r'^(\d+)(?:<([^>]+)>)?(?:,|$)')
 TEMP_OPEN = re.compile(r'^(?:[^,]+, )?"/tmp/|^AT_FDCWD</tmp/job>, "(?!/|\.\./)[^"]+')
+OPEN_CALLS = {"open", "openat", "openat2"}
 
 
 def sandbox(source, stdin, run_id):
@@ -155,24 +156,48 @@ def worker_ids(events):
             and "CLONE_THREAD" in e["args"] and e.get("result", "").isdigit() and int(e["result"]) > 0}
 
 
-def file_failure(events):
-    previous_calls = {}
+def file_calls(events):
+    opened = {}
     for event in events:
         if event["kind"] != "syscall":
             continue
-        previous = previous_calls.get(event["pid"])
-        previous_calls[event["pid"]] = event
+        call, args, returned = event["call"], event["args"], event["result"]
+        pid = event["pid"]
+        if call in OPEN_CALLS and (created := FILE_FD.match(returned)):
+            key = (pid, created[1])
+            if TEMP_OPEN.match(args) or (created[2] or "").startswith("/tmp/"):
+                opened[key] = event["id"]
+            else:
+                opened.pop(key, None)
+        identity = None
+        if call not in OPEN_CALLS and (used := FILE_FD.match(args)):
+            key = (pid, used[1])
+            # Some strace runs cannot resolve the descriptor path. Retain the successful open as evidence.
+            if used[2] is None or used[2].startswith("/tmp/"):
+                opened_at = opened.get(key)
+                if opened_at is not None or used[2] is not None:
+                    identity = (*key, opened_at or used[2])
+            if call == "close" and returned == "0":
+                opened.pop(key, None)
+        yield event, identity
+
+
+def file_failure(events):
+    previous_calls = {}
+    for event, identity in file_calls(events):
+        previous, previous_identity = previous_calls.get(event["pid"], (None, None))
+        previous_calls[event["pid"]] = event, identity
         call, args, error = event["call"], event["args"], event["errno"]
         if not error:
             continue
-        if call in {"open", "openat", "openat2"} and TEMP_OPEN.match(args):
+        if call in OPEN_CALLS and TEMP_OPEN.match(args):
             return [event]
         if call in {"read", "write", "close", "lseek", "pread64", "pwrite64"}:
-            if TEMP_FD.match(args):
+            if identity:
                 return [event]
-            if error == "EBADF" and previous and previous["call"] == "close" and previous["result"] == "0":
-                closed = TEMP_FD.match(previous["args"])
-                if closed and (args == closed[1] or args.startswith(closed[1] + ",")):
+            if error == "EBADF" and previous_identity and previous["call"] == "close" and previous["result"] == "0":
+                fd = previous_identity[1]
+                if args == fd or args.startswith(fd + ","):
                     return [previous, event]
     return []
 
@@ -258,10 +283,9 @@ def observed_behavior(lab, case, events):
     calls = [event for event in events if event["kind"] == "syscall" and event.get("errno") is None]
     if lab == "file":
         written, rewound = set(), set()
-        for event in calls:
-            if not (descriptor := TEMP_FD.match(event["args"])):
+        for event, key in file_calls(calls):
+            if not key:
                 continue
-            key = (event["pid"], *descriptor.groups())
             call, returned = event["call"], event["result"]
             if call == "close" and returned == "0":
                 written.discard(key)

@@ -80,6 +80,8 @@ class Evaluation(TestCase):
         ]
         case = LABS["file"]["cases"][0]
         self.assertTrue(observed_behavior("file", case, events_from("\n".join(lines))))
+        bare = "\n".join(lines).replace("</tmp/job/notes.txt>", "")
+        self.assertTrue(observed_behavior("file", case, events_from(bare)))
         self.assertFalse(observed_behavior("file", case, events_from("\n".join(lines[:-1]))))
 
     def test_trace_failure_is_stored_as_unscored(self):
@@ -193,7 +195,8 @@ class Evaluation(TestCase):
                     good = jobs.submit(evaluate, key, sample(lab), f"good-{key}")
                     bad = jobs.submit(evaluate, key, sample(lab, broken=True), f"bad-{key}")
                     passed, failed = good.result(), bad.result()
-                    self.assertEqual(passed["passed"], 2, [(c["status"], c.get("stderr")) for c in passed["cases"]])
+                    self.assertEqual(passed["passed"], 2,
+                                     [(c["status"], c.get("trace", "")[-2200:]) for c in passed["cases"]])
                     self.assertLess(failed["passed"], 2)
                     analysis = failed["diagnosis"]
                     case = failed["cases"][failed["evidence_case"]]

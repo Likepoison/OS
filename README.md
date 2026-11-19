@@ -12,6 +12,8 @@ python app.py
 
 在 **Ports** 中打开 8000 端口的私有预览。建议运行「进程与管道」故障样例，查看关联事件和分层提示，再切换正确样例重跑。在实验记录点击「对比最近两次」，逐用例核对变化，并从对比页直接打开相关轨迹。证据不足时可以跳到轨迹末页继续排查。演示结束后停止 Codespace。
 
+点击右下角的「排错鸭助教」，可在气泡里问排查方向、打开本次分层提示，或做一道与当前实验相关的概念题。将鼠标划过可看到动作，拖动或用方向键可以调整位置，按 Esc 收起。桌宠用词来自本地教学话术，问题不会送到模型，概念题不影响实验得分。已有 DeepSeek 反馈时，桌宠会提供对应入口。
+
 如果网页 IDE 连接缓慢，在 [Your Codespaces](https://github.com/codespaces) 选择同一个 Codespace，使用 **Open in → Visual Studio Code**。桌面 VS Code 需安装 GitHub Codespaces 扩展并登录，终端依然运行在远端。
 
 有 Docker 的 Linux 虚拟机也可运行。要求 Docker 支持 cgroup v2，Python 3.10 或更新版本。
@@ -46,3 +48,4 @@ python3 app.py
 - [Docker 资源约束](https://docs.docker.com/engine/containers/resource_constraints/)用于配置和实测 CPU、内存、交换空间及进程数上限。
 - [strace 手册](https://man7.org/linux/man-pages/man1/strace.1.html)与 [ptrace 手册](https://man7.org/linux/man-pages/man2/ptrace.2.html)用于跟踪进程树、解码描述符并判定采集和权限边界。
 - 题目提供的 [Go](https://go.dev/doc/)、[PostgreSQL](https://www.postgresql.org/docs/current/installation.html)、[MinIO](https://docs.min.io/aistor/installation/linux/install/) 是参考选项。按需演示使用 Python 和 SQLite。
+- 桌宠的气泡、选项与状态互动参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion) 和 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)。橡皮鸭素材由 Marc Duiker 为 [VS Code Pets](https://github.com/tonybaloney/vscode-pets/blob/c9ed4f736bda011f361e052e252b947928501d68/docs/credits.md) 创作，随附[上游 MIT 许可](pet/LICENSE-vscode-pets.txt)。
