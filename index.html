@@ -254,6 +254,7 @@ function render() {
   const confidence = {confirmed:"已确认", suspected:"疑似", insufficient:"证据不足"};
   if (!ok) box.append(el("p", confidence[diagnosis.confidence] + " · " +
     (diagnosis.evidence.length ? "关联 " + diagnosis.evidence.length + " 条轨迹事件" : "依据测试判定")));
+  if (diagnosis.detail) box.append(el("p", diagnosis.detail));
   if (diagnosis.evidence.length) box.append(button("查看关联事件", () => {
     caseIndex = result.evidence_case; onlyEvidence = true; showTab("trace");
   }));

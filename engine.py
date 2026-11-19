@@ -84,6 +84,54 @@ def events_from(raw):
     return events
 
 
+
+def pipe_wait(events, waiting):
+    """Infer tracked pipe ownership within the observed portion of one process tree."""
+    tables = {}
+    pipe_events = {}
+    for event in events:
+        if event["id"] >= waiting["id"]:
+            break
+        pid, kind = event["pid"], event["kind"]
+        if kind == "exit":
+            tables.pop(pid, None)
+            continue
+        if kind != "syscall" or event.get("errno"):
+            continue
+        fds = tables.setdefault(pid, {})
+        call = event["call"]
+        first = re.match(r"(\d+)", event.get("args", ""))
+        returned = re.match(r"(\d+)", event.get("result", ""))
+        if call in {"pipe", "pipe2"} and event.get("result") == "0":
+            pair = re.match(r"\[(\d+)(?:<[^>]+>)?,\s*(\d+)(?:<[^>]+>)?\]", event["args"])
+            if pair:
+                pipe_events[event["id"]] = event
+                fds[int(pair[1])] = (event["id"], "read")
+                fds[int(pair[2])] = (event["id"], "write")
+        elif call in {"clone", "clone3", "fork", "vfork"} and returned and int(returned[1]):
+            tables[int(returned[1])] = fds if "CLONE_FILES" in event["args"] else fds.copy()
+        elif call == "close" and first and event.get("result") == "0":
+            fds.pop(int(first[1]), None)
+        elif first and returned and (call in {"dup", "dup2", "dup3"} or
+                                     (call == "fcntl" and "F_DUPFD" in event["args"])):
+            entry = fds.get(int(first[1]))
+            if entry:
+                fds[int(returned[1])] = entry
+            else:
+                fds.pop(int(returned[1]), None)
+    descriptor = re.match(r"(\d+)", waiting.get("args", ""))
+    if not descriptor:
+        return None
+    reader = tables.get(waiting["pid"], {}).get(int(descriptor[1]))
+    if not reader or reader[1] != "read":
+        return None
+    owners = sorted({(pid, fd) for pid, fds in tables.items() for fd, entry in fds.items()
+                     if entry == (reader[0], "write")})
+    if not owners:
+        return None
+    return pipe_events[reader[0]], owners
+
+
 def diagnose(lab, case, events):
     def result(code, title, confidence, evidence, hints):
         return {"code": code, "title": title, "confidence": confidence,
@@ -101,13 +149,17 @@ def diagnose(lab, case, events):
         waits = [e for e in events if e.get("kind") == "pending"]
         for waiting in reversed(waits):
             if lab == "pipe" and waiting.get("call") == "read":
-                pipe_id = re.search(r"pipe:\[\d+\]", waiting["text"])
-                if pipe_id:
-                    writes = [e for e in events if e.get("call") in {"pipe", "pipe2", "write"}
-                              and pipe_id[0] in e["text"]]
-                    return result("pipe_wait", "疑似在等待管道 EOF", "suspected", [*writes[-2:], waiting],
-                                  ["查看最后一次未返回的读操作。", "只要还有进程持有写端，管道读完缓冲区也不会收到 EOF。",
-                                   "对照同一个管道编号，检查 fork 后父子进程各自保留了哪些描述符。"])
+                tracked = pipe_wait(events, waiting)
+                if tracked:
+                    opened, owners = tracked
+                    finding = result("pipe_wait", "疑似在等待管道 EOF", "suspected", [opened, waiting],
+                                     ["查看哪一个读操作在超时前还没返回。",
+                                      "缓冲区读空后，什么时候才能收到 EOF？",
+                                      "结合管道创建和等待事件，检查哪些进程仍可能持有写端。"])
+                    finding["detail"] = "按已采集轨迹推断，仍可能持有写端：" + "、".join(
+                        f"PID {pid} / FD {fd}" for pid, fd in owners[:4]
+                    )
+                    return finding
             if lab in {"mutex", "deadlock"} and waiting.get("call") == "futex":
                 return result("sync_wait", "同步等待超时", "suspected", [waiting],
                               ["定位仍在等待的线程。", "futex 等待也会出现在正常同步中，需要结合锁顺序和退出路径。",
