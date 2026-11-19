@@ -16,7 +16,11 @@ class Demo(TestCase):
 
         with TemporaryDirectory() as temp:
             env = {**os.environ, "TRACETUTOR_DB": str(Path(temp) / "test.sqlite3")}
-            env.pop("DEEPSEEK_API_KEY", None)
+            live = env.get("TRACE_LIVE_AI") == "1"
+            if live:
+                self.assertTrue(env.get("DEEPSEEK_API_KEY"), "GitHub Actions model secret is missing")
+            else:
+                env.pop("DEEPSEEK_API_KEY", None)
             server = subprocess.Popen([sys.executable, "app.py"], env=env)
             try:
                 deadline = monotonic() + 10
@@ -43,7 +47,12 @@ class Demo(TestCase):
                         page.screenshot(path=f"{out}/workspace.png", full_page=True)
 
                     page.get_by_role("button", name="故障样例").click()
-                    run.click()
+                    if live:
+                        page.get_by_label("请求 AI 提示").check()
+                    with page.expect_response(lambda response: response.request.method == "POST" and
+                                              response.url.endswith("/api/runs")) as submitted:
+                        run.click()
+                    run_id = submitted.value.json()["id"]
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible(timeout=30000)
                     page.get_by_role("button", name="查看关联事件").click()
                     expect(page.locator(".event.evidence").first).to_be_visible()
@@ -51,7 +60,19 @@ class Demo(TestCase):
                     if out:
                         page.screenshot(path=f"{out}/evidence.png", full_page=True)
                     page.get_by_role("button", name="分层提示").click()
-                    expect(page.get_by_text("规则提示", exact=True)).to_be_visible()
+                    if live:
+                        report = page.request.get(f"http://127.0.0.1:8000/api/runs/{run_id}").json()["result"]
+                        feedback = report["feedback"]
+                        self.assertEqual(feedback["source"], "ai", feedback.get("reason"))
+                        self.assertEqual(set(feedback["evidence"]), set(report["diagnosis"]["evidence"]))
+                        self.assertEqual(len(feedback["hints"]), 3)
+                        expect(page.get_by_text("AI · " + feedback["model"], exact=True)).to_be_visible()
+                        print(json.dumps({"model": feedback["model"], "usage": feedback["usage"],
+                                          "duration_ms": feedback["duration_ms"],
+                                          "verified_evidence": len(feedback["evidence"])}, ensure_ascii=False))
+                        page.get_by_label("请求 AI 提示").uncheck()
+                    else:
+                        expect(page.get_by_text("规则提示", exact=True)).to_be_visible()
                     expect(page.get_by_text("证据定位", exact=True)).to_be_visible()
 
                     page.get_by_role("button", name="正确样例").click()

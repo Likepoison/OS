@@ -3,6 +3,11 @@ name: Sandbox acceptance
 on:
   push:
   workflow_dispatch:
+    inputs:
+      verify_live_ai:
+        description: "Verify one real DeepSeek response"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,7 +22,11 @@ jobs:
           persist-credentials: false
       - run: bash tests/sandbox.sh
       - run: python3 -m unittest discover -s tests -p test_system.py -v
-      - run: |
+      - name: Verify browser demo
+        env:
+          TRACE_LIVE_AI: ${{ inputs.verify_live_ai == true && '1' || '0' }}
+          DEEPSEEK_API_KEY: ${{ inputs.verify_live_ai == true && secrets.DEEPSEEK_API_KEY || '' }}
+        run: |
           sudo apt-get install -y fonts-noto-cjk
           python3 -m venv "$RUNNER_TEMP/trace-browser"
           source "$RUNNER_TEMP/trace-browser/bin/activate"

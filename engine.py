@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from time import monotonic
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -265,5 +266,10 @@ def ai_hints(lab_key, diagnosis, events):
             raise ValueError("模型提示或证据引用不符合约定")
         return {"source": "ai", "hints": hints, "evidence": refs, "model": completion["model"],
                 "usage": completion.get("usage"), "duration_ms": round((monotonic() - started) * 1000)}
-    except (ValueError, OSError, KeyError, IndexError, TypeError):
-        return {"source": "rules", "reason": "模型不可用或反馈校验失败", "hints": diagnosis["hints"]}
+    except HTTPError as error:
+        reason = f"模型服务返回 HTTP {error.code}"
+    except OSError:
+        reason = "模型服务连接失败或超时"
+    except (ValueError, KeyError, IndexError, TypeError):
+        reason = "模型反馈校验失败"
+    return {"source": "rules", "reason": reason, "hints": diagnosis["hints"]}
