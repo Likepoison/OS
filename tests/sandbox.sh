@@ -50,8 +50,8 @@ timeout 5s bash -c 'until docker logs "$1" | grep -qx detached; do sleep .1; don
 mapfile -t pids < <(docker top "$container" -eo pid | tail -n +2)
 test "${#pids[@]}" -eq 2
 rc=0
-timeout 1s docker wait "" >/dev/null || rc=True
-test "" -eq 124
+timeout 1s docker wait "$container" >/dev/null || rc=$?
+test "$rc" -eq 124
 docker rm -f "$container" >/dev/null
 if docker inspect "$container" >/dev/null 2>&1; then exit 1; fi
 for pid in "${pids[@]}"; do
