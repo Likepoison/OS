@@ -41,7 +41,16 @@ def sandbox(source, stdin, run_id):
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("容器未在宿主机时限内返回") from exc
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=8, check=False)
+        try:
+            cleanup = subprocess.run(["docker", "rm", "-f", name],
+                                     capture_output=True, timeout=8, check=False)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RuntimeError(f"容器清理失败（{name}）") from exc
+        if cleanup.returncode:
+            error = cleanup.stderr.decode(errors="replace").strip()
+            if error not in {f"No such container: {name}",
+                             f"Error response from daemon: No such container: {name}"}:
+                raise RuntimeError(f"容器清理失败（{name}）：{error[-600:]}")
 
 
 def events_from(raw):
@@ -182,6 +191,46 @@ def diagnose(lab, case, events):
                    "查看判定中的编译或运行输出，确认最早出现的差异。"])
 
 
+def output_matches(lab, output, expected):
+    if lab not in {"mutex", "deadlock"}:
+        return output == expected
+    actual, target = output.splitlines(keepends=True), expected.splitlines(keepends=True)
+    return actual[-1:] == target[-1:] and sorted(actual[:-1]) == sorted(target[:-1])
+
+
+def observed_behavior(lab, case, events):
+    calls = [event for event in events if event["kind"] == "syscall" and event.get("errno") is None]
+    if lab == "memory":
+        size = str(max(1, int(case["stdin"])))
+        allocations = set()
+        for event in calls:
+            args = event["args"].split(", ")
+            if (event["call"] == "mmap" and len(args) == 6 and args[1] == size
+                    and "MAP_ANONYMOUS" in args[3].split("|")
+                    and {"PROT_READ", "PROT_WRITE"} <= set(args[2].split("|"))
+                    and re.fullmatch(r"0x[0-9a-f]+", event["result"])):
+                allocations.add((event["pid"], event["result"]))
+            if (event["call"] == "munmap" and len(args) == 2 and args[1] == size
+                    and event["result"] == "0" and (event["pid"], args[0]) in allocations):
+                return True
+        return False
+    if lab in {"mutex", "deadlock"}:
+        threads = {
+            int(event["result"]) for event in calls
+            if event["call"] in {"clone", "clone3"} and "CLONE_THREAD" in event["args"]
+            and event["result"].isdigit() and int(event["result"]) > 0
+        }
+        writers = {"A": set(), "B": set()}
+        for event in calls:
+            if event["call"] == "write" and event["pid"] in threads and event["result"] == "9":
+                marker = re.fullmatch(r'1(?:<[^>]+>)?, "worker ([AB])\\n", 9', event["args"])
+                if marker:
+                    writers[marker[1]].add(event["pid"])
+        return any(first != second for first in writers["A"] for second in writers["B"])
+    observed = {event["call"] for event in calls}
+    return all(observed.intersection(group) for group in LABS[lab]["required"])
+
+
 def evaluate(lab_key, source, run_id, progress=lambda _: None):
     lab = LABS[lab_key]
     results = []
@@ -206,13 +255,10 @@ def evaluate(lab_key, source, run_id, progress=lambda _: None):
             "output_limit" if runtime["truncated"] or runtime["trace_truncated"] else
             "trace_error" if 'execve("/tmp/job/task"' not in raw else
             "runtime_error" if runtime["code"] != 0 else
-            "wrong_output" if runtime["stdout"] != case["expected"] else "passed"
+            "wrong_output" if not output_matches(lab_key, runtime["stdout"], case["expected"]) else "passed"
         )
-        if case_result["status"] == "passed":
-            observed = {event["call"] for event in events_from(raw)
-                        if event["kind"] == "syscall" and event.get("errno") is None}
-            if any(not observed.intersection(group) for group in lab["required"]):
-                case_result["status"] = "missing_behavior"
+        if case_result["status"] == "passed" and not observed_behavior(lab_key, case, events_from(raw)):
+            case_result["status"] = "missing_behavior"
         results.append(case_result)
 
     progress("analyzing")

@@ -62,6 +62,39 @@ class Evaluation(TestCase):
         remaining = subprocess.check_output(["docker", "ps", "-aq", "--filter", "label=tracetutor.run"])
         self.assertEqual(remaining, b"")
 
+    def test_rejects_expected_output_without_memory_or_thread_behavior(self):
+        memory = '#include <stdio.h>\nint main(void){size_t n; scanf("%zu",&n); printf("%zu\\n",n);}'
+        threads = """
+#include <pthread.h>
+#include <stdio.h>
+static void *empty(void *arg) { return arg; }
+int main(void) {
+    pthread_t a, b;
+    int n;
+    scanf("%d", &n);
+    pthread_create(&a, NULL, empty, NULL);
+    pthread_create(&b, NULL, empty, NULL);
+    pthread_join(a, NULL);
+    pthread_join(b, NULL);
+    printf("worker A\\nworker B\\n%d\\n", 2*n);
+}
+"""
+        for lab, source in [("memory", memory), ("mutex", threads), ("deadlock", threads)]:
+            with self.subTest(lab=lab):
+                report = evaluate(lab, source, f"behavior-{lab}")
+                self.assertEqual(report["passed"], 0)
+                self.assertEqual([case["status"] for case in report["cases"]], ["missing_behavior"] * 2)
+
+    def test_cleanup_failure_is_a_platform_error(self):
+        def docker(args, **_kwargs):
+            if args[1] == "run":
+                return subprocess.CompletedProcess(args, 0, b"{}", b"")
+            return subprocess.CompletedProcess(args, 1, b"", b"conflict: cannot remove running container")
+
+        with patch("engine.subprocess.run", side_effect=docker):
+            with self.assertRaisesRegex(RuntimeError, r"容器清理失败（tracetutor-[0-9a-f]+）"):
+                sandbox("int main(void){}", "", "cleanup-failure")
+
     def test_compile_and_output_error(self):
         invalid = evaluate("pipe", "int main( {", "invalid")
         self.assertEqual(invalid["cases"][0]["status"], "compile_error")

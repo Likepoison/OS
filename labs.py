@@ -77,57 +77,64 @@ LABS = {
         (("openat", "open"), ("lseek",), ("read",)),
     ),
     "mutex": lab(
-        "线程同步", "两个线程各增加共享计数 N 次，主线程等待两者结束并输出 2N。",
+        "线程同步", "两个工作线程各增加共享计数 N 次，各自用一次 write 输出 worker A 或 worker B（顺序不限）。主线程等待两者结束后输出 2N。",
         r"""
         #include <pthread.h>
         #include <stdio.h>
+        #include <unistd.h>
 
         static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
         static int count, iterations;
 
         static void *worker(void *arg) {
-            (void)arg;
+            const char *marker = *(const char *)arg == 'A' ? "worker A\n" : "worker B\n";
             for (int i = 0; i < iterations; ++i) {
                 pthread_mutex_lock(&lock);
                 ++count;
                 pthread_mutex_unlock(&lock);
             }
+            if (write(STDOUT_FILENO, marker, 9) != 9) return (void *)1;
             return NULL;
         }
 
         int main(void) {
             if (scanf("%d", &iterations) != 1 || iterations < 0) return 1;
             pthread_t first, second;
-            if (pthread_create(&first, NULL, worker, NULL)) return 2;
-            if (pthread_create(&second, NULL, worker, NULL)) return 2;
+            if (pthread_create(&first, NULL, worker, "A")) return 2;
+            if (pthread_create(&second, NULL, worker, "B")) return 2;
             if (pthread_join(first, NULL) || pthread_join(second, NULL)) return 3;
             printf("%d\n", count);
             return 0;
         }
         """,
         ("pthread_mutex_unlock(&lock);", "/* Lock remains held */"),
-        ("8\n", "16\n"), ("0\n", "0\n"), (("clone", "clone3"),),
+        ("8\n", "worker A\nworker B\n16\n"), ("0\n", "worker A\nworker B\n0\n"), (),
     ),
     "memory": lab(
-        "内存分配", "输入指定申请的字节数，每页写入一次后释放，输出实际处理的字节数。",
+        "内存分配", "用 mmap 申请输入指定的字节数，逐页写入后用 munmap 释放。输入为 0 时映射 1 字节。输出输入值。",
         r"""
+        #define _GNU_SOURCE
         #include <stdio.h>
-        #include <stdlib.h>
+        #include <sys/mman.h>
+        #include <unistd.h>
 
         int main(void) {
             size_t bytes;
             if (scanf("%zu", &bytes) != 1) return 1;
-            volatile unsigned char *area = malloc(bytes ? bytes : 1);
-            if (!area) return 2;
-            for (size_t offset = 0; offset < bytes; offset += 4096) area[offset] = 1;
-            free((void *)area);
+            size_t length = bytes ? bytes : 1;
+            volatile unsigned char *area = mmap(NULL, length, PROT_READ | PROT_WRITE,
+                                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (area == MAP_FAILED) return 2;
+            size_t page = (size_t)sysconf(_SC_PAGESIZE);
+            for (size_t offset = 0; offset < bytes; offset += page) area[offset] = 1;
+            if (munmap((void *)area, length) != 0) return 3;
             printf("%zu\n", bytes);
             return 0;
         }
         """,
-        ("volatile unsigned char *area = malloc(bytes ? bytes : 1);",
-         "bytes = 256 * 1024 * 1024;\n    volatile unsigned char *area = malloc(bytes);"),
-        ("16384\n", "16384\n"), ("0\n", "0\n"), (),
+        ("size_t length = bytes ? bytes : 1;",
+         "bytes = 256 * 1024 * 1024;\n    size_t length = bytes;"),
+        ("4194304\n", "4194304\n"), ("0\n", "0\n"), (),
     ),
     "schedule": lab(
         "轮转调度", "在用户态模拟两个任务的轮转，每轮每个未完成任务执行一个时间片，按顺序输出任务字母。",
@@ -155,37 +162,39 @@ LABS = {
         ("3 2\n", "ABABA\n"), ("0 2\n", "BB\n"), (),
     ),
     "deadlock": lab(
-        "死锁与锁顺序", "两个线程使用相同的加锁顺序更新共享值。主线程输出两次更新的总和。",
+        "死锁与锁顺序", "两个工作线程按相同的加锁顺序更新共享值，并各自用一次 write 输出 worker A 或 worker B（顺序不限）。主线程输出总和。",
         r"""
         #include <pthread.h>
         #include <stdio.h>
+        #include <unistd.h>
 
         static pthread_mutex_t first = PTHREAD_MUTEX_INITIALIZER;
         static pthread_mutex_t second = PTHREAD_MUTEX_INITIALIZER;
         static int value, increment;
 
         static void *worker(void *arg) {
-            (void)arg;
+            const char *marker = *(const char *)arg == 'A' ? "worker A\n" : "worker B\n";
             pthread_mutex_lock(&first);
             pthread_mutex_lock(&second);
             value += increment;
             pthread_mutex_unlock(&second);
             pthread_mutex_unlock(&first);
+            if (write(STDOUT_FILENO, marker, 9) != 9) return (void *)1;
             return NULL;
         }
 
         int main(void) {
             if (scanf("%d", &increment) != 1) return 1;
             pthread_t a, b;
-            if (pthread_create(&a, NULL, worker, NULL)) return 2;
-            if (pthread_create(&b, NULL, worker, NULL)) return 2;
+            if (pthread_create(&a, NULL, worker, "A")) return 2;
+            if (pthread_create(&b, NULL, worker, "B")) return 2;
             if (pthread_join(a, NULL) || pthread_join(b, NULL)) return 3;
             printf("%d\n", value);
             return 0;
         }
         """,
         ("pthread_mutex_lock(&second);", "pthread_mutex_lock(&first);  /* Self-deadlock */"),
-        ("7\n", "14\n"), ("0\n", "0\n"), (("clone", "clone3"),),
+        ("7\n", "worker A\nworker B\n14\n"), ("0\n", "worker A\nworker B\n0\n"), (),
     ),
 }
 

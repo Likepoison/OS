@@ -269,7 +269,8 @@ function render() {
     const code = test.compile;
     if (test.status === "compile_error") details.append(el("pre", code.stderr || "编译过程未正常结束"));
     else {
-      details.append(el("p", "预期输出", "muted"), el("pre", test.expected || "（空输出）"));
+      const expectedLabel = ["mutex", "deadlock"].includes(record.lab) ? "预期输出（工作线程行顺序不限）" : "预期输出";
+      details.append(el("p", expectedLabel, "muted"), el("pre", test.expected || "（空输出）"));
       details.append(el("p", "实际输出", "muted"), el("pre", test.stdout || "（空输出）"));
       if (test.stderr) details.append(el("pre", test.stderr));
     }
