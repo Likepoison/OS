@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TraceTutor · 操作系统实验工作台</title>
+<style>
+:root {
+  color-scheme: light;
+  --ink: oklch(.25 .029 265); --muted: oklch(.47 .038 265);
+  --line: oklch(.90 .015 265); --paper: oklch(1 0 0); --canvas: oklch(.978 .008 265);
+  --soft: oklch(.952 .016 266); --indigo: oklch(.46 .093 269);
+  --teal: oklch(.43 .078 175); --teal-bg: oklch(.95 .028 173);
+  --amber: oklch(.43 .084 66); --amber-bg: oklch(.96 .033 83);
+  --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; color: var(--ink); background: var(--canvas); font: 15px/1.55 system-ui, "Microsoft YaHei", sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button, select, a { -webkit-tap-highlight-color: transparent; }
+button, select { cursor: pointer; }
+button:disabled { opacity: .55; cursor: wait; }
+button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--indigo); outline-offset: 3px;
+}
+a { color: var(--indigo); }
+[hidden] { display: none !important; }
+header { background: var(--paper); border-bottom: 1px solid var(--line); }
+.bar, main { max-width: 1360px; margin: auto; padding-inline: 34px; }
+.bar { min-height: 68px; display: flex; flex-wrap: wrap; align-items: center; column-gap: 44px; }
+.brand { display: flex; align-items: center; gap: 11px; font-weight: 750; font-size: 20px; letter-spacing: -.025em; }
+.mark { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--indigo); color: white; font: 600 14px var(--mono); }
+nav { display: flex; gap: 22px; align-self: stretch; }
+.tab { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 0 2px; min-height: 41px; color: var(--muted); white-space: nowrap; }
+.tab[aria-pressed="true"] { border-bottom-color: var(--indigo); color: var(--indigo); font-weight: 680; }
+.tab:hover { color: var(--indigo); }
+.runtime { margin-left: auto; color: var(--muted); font: 12px var(--mono); letter-spacing: .01em; }
+main { padding-block: 35px 56px; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 34px; line-height: 1.2; letter-spacing: -.035em; }
+h2 { font-size: 17px; letter-spacing: -.015em; }
+h3 { font-size: 15px; }
+.intro { display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 16px; margin-bottom: 22px; }
+.intro p { color: var(--muted); margin-top: 8px; }
+.labbar { display: flex; gap: 17px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 13px 17px; background: var(--paper); margin-bottom: 18px; }
+select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px; background: var(--paper); padding: 7px 10px; }
+#summary { color: var(--muted); font-size: 14px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.panel { min-width: 0; border: 1px solid var(--line); border-radius: 13px; background: var(--paper); }
+.panel-head, .panel-foot { padding: 14px 17px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 9px; }
+.panel-head { border-bottom: 1px solid var(--line); }
+.panel-foot { border-top: 1px solid var(--line); }
+.tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.button { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font-size: 13px; }
+.button:hover:not(:disabled) { background: var(--soft); }
+.primary { background: var(--indigo); color: white; border-color: var(--indigo); padding: 9px 16px; font-size: 14px; font-weight: 650; }
+.primary:hover:not(:disabled) { background: oklch(.40 .093 269); }
+.editor { display: flex; background: oklch(.99 .006 266); height: 470px; }
+#numbers { color: var(--muted); background: var(--soft); margin: 0; padding: 13px 10px; overflow: hidden; text-align: right; min-width: 38px; border-right: 1px solid var(--line); user-select: none; }
+#source, #numbers { font: 13px/23px var(--mono); tab-size: 4; }
+#source { width: 100%; flex: 1; min-width: 0; background: transparent; padding: 13px 15px; border: 0; resize: none; white-space: pre; }
+.status { padding: 3px 8px; font-size: 12px; font-weight: 650; border-radius: 6px; background: var(--soft); color: var(--indigo); }
+.status.good { background: var(--teal-bg); color: var(--teal); }
+.status.warn { background: var(--amber-bg); color: var(--amber); }
+.result-nav { padding-inline: 17px; border-bottom: 1px solid var(--line); }
+#contents { min-height: 392px; padding: 17px; }
+.empty { display: grid; min-height: 340px; align-content: center; justify-items: center; text-align: center; gap: 9px; padding: 30px 15px; }
+.empty p, .muted { color: var(--muted); font-size: 13px; }
+.empty-mark { width: 46px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); color: var(--indigo); font: 16px var(--mono); margin-bottom: 5px; }
+.finding { padding: 13px 14px; border-radius: 9px; background: var(--soft); margin-bottom: 13px; }
+.finding.warn { background: var(--amber-bg); }
+.finding p { margin-top: 3px; font-size: 13px; }
+.finding button { margin-top: 8px; }
+.case { padding: 10px 1px; border-bottom: 1px solid var(--line); }
+.case summary, .hint summary { cursor: pointer; font-weight: 630; }
+.case pre, .event pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 12px/1.55 var(--mono); margin: 6px 0; }
+.case pre { background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 200px; overflow: auto; }
+.case .muted { display: inline-block; margin-top: 6px; }
+.trace-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
+.trace-tools input { min-width: 120px; flex: 1; }
+.event-list { max-height: 405px; overflow: auto; }
+.event { border-bottom: 1px solid var(--line); padding: 8px 7px; min-width: 0; }
+.event.evidence { border-left: 3px solid var(--indigo); background: var(--canvas); }
+.event small { color: var(--muted); font: 12px var(--mono); overflow-wrap: anywhere; }
+.event pre { margin-bottom: 0; }
+.pager { margin-top: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.hint { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.hint p { padding: 8px 0 0; color: var(--muted); }
+.notice { color: var(--amber); margin-top: 11px; overflow-wrap: anywhere; }
+.ai-option { color: var(--muted); font-size: 13px; }
+#counts { display: flex; flex-wrap: wrap; gap: 8px; padding: 13px 17px; border-bottom: 1px solid var(--line); }
+#records { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; text-align: left; }
+th, td { white-space: nowrap; padding: 10px 17px; border-bottom: 1px solid var(--line); }
+th { background: var(--canvas); color: var(--muted); font-weight: 620; }
+td code { font: 12px var(--mono); }
+@media (max-width: 850px) {
+  .grid { grid-template-columns: 1fr; }
+  .editor { height: 370px; }
+  .bar, main { padding-inline: 20px; }
+}
+@media (max-width: 540px) {
+  .bar { column-gap: 19px; }
+  main { padding-top: 23px; }
+  h1 { font-size: 28px; }
+  .runtime { display: none; }
+  .labbar { flex-wrap: wrap; gap: 5px; }
+  .panel-head, .panel-foot, #contents { padding-inline: 13px; }
+}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span>TraceTutor</div>
+  <nav aria-label="页面">
+    <button type="button" class="tab" id="work-tab" aria-pressed="true">实验工作台</button>
+    <button type="button" class="tab" id="history-tab" aria-pressed="false">实验记录</button>
+  </nav>
+  <span class="runtime">Linux · C · strace</span>
+</div></header>
+<main>
+<section id="workspace" aria-labelledby="work-title">
+  <div class="intro"><div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div></div>
+  <div class="labbar">
+    <label for="lab"><strong>实验</strong></label><select id="lab"></select><p id="summary"></p>
+  </div>
+  <div class="grid">
+    <section class="panel" aria-labelledby="code-title">
+      <div class="panel-head"><h2 id="code-title">源代码 <span class="muted">· main.c</span></h2>
+        <div class="tool-row"><button class="button" id="good" type="button">正确样例</button><button class="button" id="bad" type="button">故障样例</button></div>
+      </div>
+      <div class="editor"><pre id="numbers" aria-hidden="true">1</pre><textarea id="source" aria-label="C 源代码" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea></div>
+      <div class="panel-foot"><label class="ai-option"><input type="checkbox" id="ai" disabled> 请求 AI 提示</label>
+        <button class="button primary" id="run" type="button" disabled>运行实验 <span aria-hidden="true">→</span></button>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="result-title">
+      <div class="panel-head"><h2 id="result-title">运行分析</h2><span class="status" id="status" role="status">待提交</span></div>
+      <nav aria-label="运行分析" class="result-nav">
+        <button class="tab" data-tab="grade" type="button" aria-pressed="true">测试判定</button>
+        <button class="tab" data-tab="trace" type="button" aria-pressed="false">系统调用</button>
+        <button class="tab" data-tab="hints" type="button" aria-pressed="false">分层提示</button>
+      </nav>
+      <div id="contents"></div>
+    </section>
+  </div>
+  <p class="notice" id="notice" role="alert" hidden></p>
+</section>
+<section id="history" hidden aria-labelledby="history-title">
+  <div class="intro"><div><h1 id="history-title">实验记录</h1><p>按实验查看最近 50 条记录和累计判定统计。</p></div>
+    <label>筛选实验 <select id="filter"><option value="">全部实验</option></select></label>
+  </div>
+  <div class="panel"><div id="counts"></div><div id="records"></div></div>
+</section>
+</main>
+<script>
+const byId = id => document.getElementById(id);
+const source = byId("source"), select = byId("lab"), contents = byId("contents");
+const labels = {
+  queued:"排队中", running:"编译与运行中", analyzing:"分析证据中", finished:"评测完成",
+  platform_error:"平台运行失败", interrupted:"服务已中断", passed:"通过", wrong_output:"输出不符",
+  compile_error:"编译失败", runtime_error:"异常退出", trace_error:"采集异常", timeout:"运行超时",
+  oom:"内存超限", output_limit:"日志达到上限", missing_behavior:"缺少要求的调用",
+  pipe_wait:"管道 EOF 等待", file_error:"文件操作错误", memory_limit:"内存超限", sync_wait:"同步等待"
+};
+let labs = [], record, tab = "grade", polling = false, caseIndex = 0, onlyEvidence = false, viewVersion = 0;
+const el = (tag, text, cls) => {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (cls) node.className = cls;
+  return node;
+};
+function button(text, click) {
+  const b = el("button", text, "button");
+  b.type = "button";
+  b.addEventListener("click", click);
+  return b;
+}
+async function api(path, options) {
+  const rs = await fetch(path, options);
+  const data = await rs.json();
+  if (!rs.ok) throw new Error(data.error || "请求失败");
+  return data;
+}
+function notice(message = "") {
+  byId("notice").textContent = message;
+  byId("notice").hidden = !message;
+}
+function lines() {
+  const gutter = byId("numbers");
+  gutter.textContent = Array.from({length: source.value.split("\n").length}, (_, i) => i + 1).join("\n");
+  gutter.scrollTop = source.scrollTop;
+}
+function loadExample(broken) {
+  const lab = labs.find(item => item.id === select.value);
+  if (!lab) return;
+  source.value = broken ? lab.broken : lab.sample;
+  source.scrollTop = 0;
+  byId("summary").textContent = lab.summary;
+  lines();
+  if (!polling) byId("run").disabled = false;
+}
+function navigate(history) {
+  byId("workspace").hidden = history;
+  byId("history").hidden = !history;
+  byId("work-tab").setAttribute("aria-pressed", String(!history));
+  byId("history-tab").setAttribute("aria-pressed", String(history));
+  if (history) refreshHistory();
+}
+function showTab(next) {
+  tab = next;
+  document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tab === next)));
+  render();
+}
+function render() {
+  const version = ++viewVersion;
+  contents.replaceChildren();
+  const result = record?.result;
+  const badge = byId("status");
+  badge.textContent = labels[record?.state] || "待提交";
+  badge.className = "status";
+  if (!result) {
+    if (record?.state === "platform_error") badge.classList.add("warn");
+    const box = el("div", undefined, "empty");
+    box.append(el("span", "↳", "empty-mark"),
+      el("h3", record ? (labels[record.state] || "运行中") : "等待一次实验运行"),
+      el("p", record?.state === "platform_error" ? "请在演示终端检查 Docker 服务与镜像，再重新运行。"
+      : record ? "任务在独立容器执行，结果会自动更新。" : "运行左侧代码，在这里查看用例、轨迹和提示。"));
+    contents.append(box);
+    return;
+  }
+  const ok = result.passed === result.total;
+  badge.textContent = result.passed + " / " + result.total + " 通过";
+  badge.classList.add(ok ? "good" : "warn");
+  if (tab === "trace") {
+    traceView(result, version);
+    return;
+  }
+  if (tab === "hints") {
+    const fb = result.feedback;
+    const src = fb.source === "ai" ? "AI · " + fb.model : "规则提示" + (fb.reason ? " · " + fb.reason : "");
+    contents.append(el("p", src, "muted"));
+    fb.hints.forEach((hint, i) => {
+      const item = el("details", undefined, "hint");
+      item.open = i === 0;
+      item.append(el("summary", ["观察方向", "相关原理", "证据定位"][i]), el("p", hint));
+      contents.append(item);
+    });
+    return;
+  }
+  const diagnosis = result.diagnosis;
+  const box = el("div", undefined, ok ? "finding" : "finding warn");
+  box.append(el("h3", diagnosis.title));
+  const confidence = {confirmed:"已确认", suspected:"疑似", insufficient:"证据不足"};
+  if (!ok) box.append(el("p", confidence[diagnosis.confidence] + " · " +
+    (diagnosis.evidence.length ? "关联 " + diagnosis.evidence.length + " 条轨迹事件" : "依据测试判定")));
+  if (diagnosis.evidence.length) box.append(button("查看关联事件", () => {
+    caseIndex = result.evidence_case; onlyEvidence = true; showTab("trace");
+  }));
+  contents.append(box);
+  result.cases.forEach((test, i) => {
+    const details = el("details", undefined, "case");
+    details.open = i === result.evidence_case && !ok;
+    const elapsed = test.duration_ms === undefined ? "" : " · " + test.duration_ms + " ms";
+    details.append(el("summary", test.name + " · " + (labels[test.status] || test.status) + elapsed));
+    const code = test.compile;
+    if (test.status === "compile_error") details.append(el("pre", code.stderr || "编译过程未正常结束"));
+    else {
+      details.append(el("p", "预期输出", "muted"), el("pre", test.expected || "（空输出）"));
+      details.append(el("p", "实际输出", "muted"), el("pre", test.stdout || "（空输出）"));
+      if (test.stderr) details.append(el("pre", test.stderr));
+    }
+    contents.append(details);
+  });
+}
+function traceView(result, version) {
+  const tools = el("div", undefined, "trace-tools"), picker = el("select");
+  picker.setAttribute("aria-label", "轨迹用例");
+  result.cases.forEach((test, i) => {
+    const o = el("option", test.name);
+    o.value = i; picker.append(o);
+  });
+  picker.value = caseIndex;
+  const search = el("input"), events = el("div", undefined, "event-list"), pager = el("div", undefined, "pager");
+  search.type = "search"; search.placeholder = "查调用、PID 或 errno"; search.setAttribute("aria-label", "搜索轨迹");
+  const base = "/api/runs/" + record.id;
+  const raw = el("a", "原始日志"); raw.target = "_blank"; raw.rel = "noopener";
+  const filter = button(onlyEvidence ? "显示全部" : "只看证据", () => {
+    onlyEvidence = !onlyEvidence; showTab("trace");
+  });
+  filter.disabled = !(caseIndex === result.evidence_case && result.diagnosis.evidence.length);
+  raw.href = base + "/raw/" + caseIndex;
+  picker.addEventListener("change", () => { caseIndex = Number(picker.value); onlyEvidence = false; showTab("trace"); });
+  tools.append(picker, search, filter, raw);
+  contents.append(tools);
+  if (result.cases[caseIndex]?.trace_truncated) contents.append(el("p", "轨迹提前结束，未返回的调用保留为等待事件。", "muted"));
+  contents.append(events, pager);
+  let requests = 0, timer;
+  async function load(page) {
+    const seq = ++requests;
+    const path = base + "/events/" + caseIndex + "?" + new URLSearchParams({
+      page, q: search.value, only: onlyEvidence && !search.value ? "evidence" : "all"
+    });
+    try {
+      const data = await api(path);
+      if (seq !== requests || version !== viewVersion) return;
+      events.replaceChildren();
+      pager.replaceChildren();
+      if (!data.events.length) events.append(el("p", "没有匹配的轨迹事件。", "muted"));
+      for (const ev of data.events) {
+        const linked = caseIndex === result.evidence_case && result.diagnosis.evidence.includes(ev.id);
+        const row = el("article", undefined, linked ? "event evidence" : "event");
+        const sourceLines = ev.lines.join("、");
+        row.append(el("small", "#" + ev.id + " · PID " + ev.pid + " · 原日志行 " + sourceLines +
+          (ev.duration_us != null ? " · " + ev.duration_us + " µs" : "")), el("pre", ev.text));
+        events.append(row);
+      }
+      const previous = button("上一页", () => load(page - 1)), next = button("下一页", () => load(page + 1));
+      previous.disabled = page === 0; next.disabled = (page + 1) * 40 >= data.total;
+      if (data.total) pager.append(previous, el("span", "共 " + data.total + " 条", "muted"), next);
+    } catch (err) {
+      if (seq === requests && version === viewVersion) events.replaceChildren(el("p", err.message, "notice"));
+    }
+  }
+  search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => load(0), 180); });
+  load(0);
+}
+async function track(id) {
+  polling = true;
+  byId("run").disabled = true;
+  try {
+    for (let attempt = 0; attempt < 160; attempt++) {
+      record = await api("/api/runs/" + id);
+      if (record.result || record.state === "platform_error") {
+        caseIndex = record.result?.evidence_case || 0;
+        showTab("grade");
+        return;
+      }
+      render();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    notice("任务尚未返回，请通过实验记录继续查看。");
+  } catch (err) { notice(err.message); }
+  finally {
+    polling = false;
+    byId("run").disabled = false;
+  }
+}
+async function refreshHistory() {
+  const selected = byId("filter").value;
+  try {
+    const data = await api("/api/runs?" + new URLSearchParams({lab:selected}));
+    if (byId("filter").value !== selected) return;
+    byId("counts").replaceChildren(...data.counts.map(c => el("span", (labels[c.outcome] || c.outcome) + " · " + c.count, "status")));
+    const table = el("table"), thead = el("thead"), head = el("tr"), body = el("tbody");
+    ["实验", "时间", "判定", "记录编号", "操作"].forEach(t => head.append(el("th", t)));
+    thead.append(head); table.append(thead, body);
+    data.runs.forEach(run => {
+      const row = el("tr"), slug = el("td"), action = el("td");
+      slug.append(el("code", run.id.slice(0, 8)));
+      const open = async () => {
+        if (polling) { navigate(false); notice("当前实验运行结束后可打开历史记录。"); return; }
+        navigate(false); notice();
+        await track(run.id);
+      };
+      action.append(button("查看", open));
+      row.append(el("td", labs.find(l => l.id === run.lab)?.title ?? run.lab), el("td", new Date(run.created).toLocaleString()),
+        el("td", labels[run.outcome] || labels[run.state] || run.state), slug, action);
+      body.append(row);
+    });
+    byId("records").replaceChildren(data.runs.length ? table : el("div", "运行实验后，判定和轨迹会出现在这里。", "empty"));
+  } catch (err) { byId("records").replaceChildren(el("p", err.message, "empty")); }
+}
+byId("work-tab").addEventListener("click", () => navigate(false));
+byId("history-tab").addEventListener("click", () => navigate(true));
+byId("filter").addEventListener("change", refreshHistory);
+byId("good").addEventListener("click", () => loadExample(false));
+byId("bad").addEventListener("click", () => loadExample(true));
+select.addEventListener("change", () => loadExample(false));
+source.addEventListener("input", lines);
+source.addEventListener("scroll", () => { byId("numbers").scrollTop = source.scrollTop; });
+document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
+byId("run").addEventListener("click", async () => {
+  notice(); byId("run").disabled = true;
+  try {
+    const queued = await api("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({lab:select.value, source:source.value, ai:byId("ai").checked})});
+    onlyEvidence = false;
+    await track(queued.id);
+  } catch (err) { notice(err.message); byId("run").disabled = false; }
+});
+render();
+api("/api/labs").then(data => {
+  labs = data.labs;
+  for (const lab of labs) {
+    const option = el("option", lab.title);
+    option.value = lab.id;
+    select.append(option);
+    byId("filter").append(option.cloneNode(true));
+  }
+  byId("ai").disabled = !data.ai;
+  if (!data.ai) byId("ai").parentElement.title = "配置模型凭据后可启用，当前使用规则提示";
+  loadExample(true);
+}).catch(err => notice(err.message));
+</script>
+</body>
+</html>
