@@ -2,7 +2,8 @@
   "name": "TraceTutor",
   "build": {"dockerfile": "Dockerfile"},
   "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:4": {}
+    "ghcr.io/devcontainers/features/docker-in-docker:4": {},
+    "ghcr.io/devcontainers/features/sshd:1": {}
   },
   "forwardPorts": [8000],
   "portsAttributes": {"8000": {"label": "TraceTutor", "onAutoForward": "notify"}},

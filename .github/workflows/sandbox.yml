@@ -57,6 +57,7 @@ jobs:
         with:
           push: never
           runCmd: >-
-            docker info --format 'cgroup={{.CgroupVersion}} driver={{.CgroupDriver}}'
+            test -x /usr/sbin/sshd
+            && docker info --format 'cgroup={{.CgroupVersion}} driver={{.CgroupDriver}}'
             && docker image inspect tracetutor-sandbox --format '{{.Id}}'
             && python3 -c "from engine import evaluate; from labs import LABS, sample; result = evaluate('pipe', sample(LABS['pipe']), 'devcontainer-smoke'); assert result['passed'] == 2, result['diagnosis']"
