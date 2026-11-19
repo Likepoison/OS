@@ -20,16 +20,17 @@ def file_limit():
     resource.setrlimit(resource.RLIMIT_FSIZE, (LIMIT, LIMIT))
 
 
-def invoke(command, timeout, label, input_data=b""):
+def invoke(command, timeout, label, input_data=b"", *, unprivileged=False):
     start = monotonic()
     stdout = Path(f"/tmp/control/{label}.out")
     stderr = Path(f"/tmp/control/{label}.err")
     before = oom_kills()
+    identity = {"user": 65534, "group": 65534, "extra_groups": []} if unprivileged else {}
     with stdout.open("wb") as out, stderr.open("wb") as err:
         try:
             code = subprocess.run(
                 command, input=input_data, stdout=out, stderr=err, timeout=timeout,
-                env=SAFE_ENV, cwd="/tmp/job", preexec_fn=file_limit, check=False,
+                env=SAFE_ENV, cwd="/tmp/job", preexec_fn=file_limit, check=False, **identity,
             ).returncode
         except subprocess.TimeoutExpired:
             code = None
@@ -46,16 +47,16 @@ def run(request):
     os.umask(0o077)
     Path("/tmp/control").mkdir(mode=0o700)
     work = Path("/tmp/job")
-    work.mkdir(mode=0o755)
+    work.mkdir()
+    work.chmod(0o755)
     source = work / "task.c"
     source.write_text(request["source"], encoding="utf-8")
     source.chmod(0o644)
     os.chown(work, 65534, 65534)
 
     compile_result = invoke(
-        ["setpriv", "--reuid=65534", "--regid=65534", "--clear-groups",
-         "gcc", "-std=c11", "-Wall", "-Wextra", "-O1", "-pthread", "task.c", "-o", "task"],
-        5, "compile",
+        ["gcc", "-std=c11", "-Wall", "-Wextra", "-O1", "-pthread", "task.c", "-o", "task"],
+        5, "compile", unprivileged=True,
     )
     if compile_result["code"] != 0:
         return {"compile": compile_result}

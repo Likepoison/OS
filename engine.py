@@ -35,7 +35,7 @@ def sandbox(source, stdin, run_id):
             capture_output=True, timeout=15, check=False,
         )
         if result.returncode:
-            raise RuntimeError("Docker 运行失败：" + result.stderr.decode(errors="replace")[:800])
+            raise RuntimeError("Docker 运行失败：" + result.stderr.decode(errors="replace")[-1400:])
         return json.loads(result.stdout)
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError("容器未在宿主机时限内返回") from exc
