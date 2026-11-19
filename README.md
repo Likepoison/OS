@@ -4,7 +4,7 @@
 
 ## 按需演示
 
-在 GitHub 仓库的 **Code → Codespaces** 选择含本项目代码的分支，创建或恢复双核 Codespace，等待实验镜像构建。终端运行：
+[用 GitHub Codespaces 打开](https://codespaces.new/Likepoison/OS?quickstart=1)，创建或恢复双核 Codespace，等待实验镜像构建。终端运行：
 
 ```bash
 python app.py
@@ -31,7 +31,7 @@ python3 app.py
 | 稳定性 10 | Actions 实测容器 CPU／内存／PID 限额、超时和子进程清理，两任务并行。单实例演示最多两个任务同时运行，队列总容量八个 |
 | 文档演示 10 | 本页启动步骤、预置样例、浏览器端到端测试。报告与录屏按赛制单独准备 |
 
-使用 [Actions](https://github.com/Likepoison/OS/actions) 查看自动验收。运行记录与日志按用例限长，保存在运行环境本地的 SQLite，未提交源码和凭据不会写入记录库。部署面向受控、私有演示。
+使用 [Actions](https://github.com/Likepoison/OS/actions) 查看自动验收。运行记录与日志按用例限长，保存在运行环境本地的 SQLite，提交的源码与凭据不写入记录库。部署面向受控、私有演示。
 
 ## 赛题参考
 

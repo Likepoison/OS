@@ -15,7 +15,7 @@
   --mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 * { box-sizing: border-box; }
-body { margin: 0; color: var(--ink); background: var(--canvas); font: 15px/1.55 system-ui, "Microsoft YaHei", sans-serif; }
+body { margin: 0; color: var(--ink); background: var(--canvas); font: 15px/1.55 system-ui, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button, select, a { -webkit-tap-highlight-color: transparent; }
 button, select { cursor: pointer; }
@@ -252,6 +252,8 @@ function render() {
   const box = el("div", undefined, ok ? "finding" : "finding warn");
   box.append(el("h3", diagnosis.title));
   const confidence = {confirmed:"已确认", suspected:"疑似", insufficient:"证据不足"};
+  const assessedLab = labs.find(l => l.id === record.lab);
+  if (assessedLab && record.lab !== select.value) box.append(el("p", "本条记录 · " + assessedLab.title));
   if (!ok) box.append(el("p", confidence[diagnosis.confidence] + " · " +
     (diagnosis.evidence.length ? "关联 " + diagnosis.evidence.length + " 条轨迹事件" : "依据测试判定")));
   if (diagnosis.detail) box.append(el("p", diagnosis.detail));
@@ -312,7 +314,7 @@ function traceView(result, version) {
         const linked = caseIndex === result.evidence_case && result.diagnosis.evidence.includes(ev.id);
         const row = el("article", undefined, linked ? "event evidence" : "event");
         const sourceLines = ev.lines.join("、");
-        row.append(el("small", "#" + ev.id + " · PID " + ev.pid + " · 原日志行 " + sourceLines +
+        row.append(el("small", "#" + ev.id + " · PID/TID " + ev.pid + " · 原日志行 " + sourceLines +
           (ev.duration_us != null ? " · " + ev.duration_us + " µs" : "")), el("pre", ev.text));
         events.append(row);
       }

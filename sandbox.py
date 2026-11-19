@@ -34,8 +34,9 @@ def invoke(command, timeout, label, input_data=b"", *, unprivileged=False):
             ).returncode
         except subprocess.TimeoutExpired:
             code = None
+    killed = oom_kills() - before
     return {
-        "code": code, "timeout": code is None, "oom": oom_kills() > before,
+        "code": code, "timeout": code is None, "oom": killed > 0, "oom_kills": killed,
         "duration_ms": round((monotonic() - start) * 1000),
         "stdout": stdout.read_bytes()[:LIMIT].decode("utf-8", errors="replace"),
         "stderr": stderr.read_bytes()[:LIMIT].decode("utf-8", errors="replace"),

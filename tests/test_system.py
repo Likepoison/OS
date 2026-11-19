@@ -6,7 +6,7 @@ import subprocess
 from unittest import TestCase
 from unittest.mock import patch
 
-from engine import ai_hints, evaluate, events_from, sandbox
+from engine import ai_hints, evaluate, events_from, pipe_wait, sandbox
 from labs import LABS, sample
 
 
@@ -21,6 +21,19 @@ class Evaluation(TestCase):
         merged, _, failed = events_from(trace)
         self.assertEqual((merged["id"], merged["lines"], merged["duration_us"]), (1, [1, 3], 220))
         self.assertEqual(failed["errno"], "EBADF")
+
+    def test_pipe_accounts_for_closing_and_inherited_descriptors(self):
+        raw = (
+            "10  1.000001 pipe2([3, 4], 0) = 0\n"
+            "10  1.000002 clone(flags=SIGCHLD) = 11\n"
+            "10  1.000003 close(4) = 0\n"
+            "10  1.000004 read(3,  <unfinished ...>\n"
+        )
+        events = events_from(raw)
+        _, owners = pipe_wait(events, events[3])
+        self.assertEqual(owners, [(11, 4)])
+        events = events_from(raw + "11  1.000005 close(4) = 0\n")
+        self.assertIsNone(pipe_wait(events, events[3]))
 
     def test_sandbox_uses_separate_identity(self):
         code = '#include <unistd.h>\n#include <stdio.h>\n'

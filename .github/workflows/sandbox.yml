@@ -18,6 +18,7 @@ jobs:
       - run: bash tests/sandbox.sh
       - run: python3 -m unittest discover -s tests -p test_system.py -v
       - run: |
+          sudo apt-get install -y fonts-noto-cjk
           python3 -m venv "$RUNNER_TEMP/trace-browser"
           source "$RUNNER_TEMP/trace-browser/bin/activate"
           pip install playwright

@@ -84,14 +84,11 @@ def events_from(raw):
     return events
 
 
-
 def pipe_wait(events, waiting):
     """Infer tracked pipe ownership within the observed portion of one process tree."""
     tables = {}
     pipe_events = {}
     for event in events:
-        if event["id"] >= waiting["id"]:
-            break
         pid, kind = event["pid"], event["kind"]
         if kind == "exit":
             tables.pop(pid, None)
@@ -142,9 +139,11 @@ def diagnose(lab, case, events):
         return result("passed", "通过全部用例", "confirmed", [],
                       ["试着在轨迹里找到本实验最关键的系统调用。"])
     if state == "oom":
-        return result("memory_limit", "触发内存限额", "confirmed", [],
-                      ["先核对输入单位与申请字节数。", "区分申请虚拟内存与实际写入页面。",
-                       "对照判定中的 cgroup OOM 记录，检查分配和释放的生命周期。"])
+        finding = result("memory_limit", "触发内存限额", "confirmed", [],
+                         ["先核对输入单位与申请字节数。", "区分申请虚拟内存与实际写入页面。",
+                          "对照判定中的 cgroup OOM 记录，检查分配和释放的生命周期。"])
+        finding["detail"] = f"cgroup memory.events 记录 {case['oom_kills']} 次 OOM 终止。"
+        return finding
     if state == "timeout":
         waits = [e for e in events if e.get("kind") == "pending"]
         for waiting in reversed(waits):
