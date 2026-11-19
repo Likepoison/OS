@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image=tracetutor-probe
+image=tracetutor-sandbox
 scratch=$(mktemp -d)
 # The fixture directory is mounted read-only, so it can contain only test inputs.
 trap 'find "$scratch" -depth -delete' EXIT
@@ -39,7 +39,11 @@ chmod 755 "$scratch" "$scratch/probe"
 limits=(--network none --user 65534:65534 --read-only --cap-drop ALL
   --security-opt no-new-privileges --cpus 1 --memory 32m --memory-swap 32m
   --pids-limit 16 --mount "type=bind,src=$scratch/probe,dst=/probe,readonly")
-docker run --name "$container" "${limits[@]}" "$image" /probe memory && exit 1
+rc=0
+docker run --name "$container" "${limits[@]}" "$image" /probe memory || rc=$?
+echo "memory probe exit=$rc"
+docker inspect -f '{{.State.OOMKilled}} {{.State.ExitCode}} {{.State.Error}}' "$container"
+test "$rc" -eq 137
 test "$(docker inspect -f '{{.State.OOMKilled}}' "$container")" = true
 test "$(docker inspect -f '{{.State.ExitCode}}' "$container")" = 137
 docker rm "$container" >/dev/null
