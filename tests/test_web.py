@@ -80,7 +80,13 @@ class Demo(TestCase):
                     expect(page.get_by_text("2 / 2 通过", exact=True)).to_be_visible(timeout=30000)
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
-                    page.get_by_role("button", name="查看").last.click()
+                    page.get_by_role("button", name="对比最近两次").click()
+                    expect(page.get_by_role("heading", name="进程与管道 · 前后对比")).to_be_visible()
+                    expect(page.locator("#comparison").get_by_text("0 / 2 用例通过", exact=False)).to_be_visible()
+                    expect(page.locator("#comparison").get_by_text("2 / 2 用例通过", exact=False)).to_be_visible()
+                    if out:
+                        page.screenshot(path=f"{out}/comparison.png", full_page=True)
+                    page.get_by_role("button", name="查看", exact=True).last.click()
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible()
 
                     page.set_viewport_size({"width": 390, "height": 844})

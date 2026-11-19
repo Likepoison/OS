@@ -90,6 +90,12 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .ai-option { color: var(--muted); font-size: 13px; }
 #counts { display: flex; flex-wrap: wrap; gap: 8px; padding: 13px 17px; border-bottom: 1px solid var(--line); }
 #records { overflow-x: auto; }
+#comparison { padding: 15px 17px; border-bottom: 1px solid var(--line); }
+.comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 9px; }
+.comparison-entry { border: 1px solid var(--line); border-radius: 8px; padding: 11px; }
+.comparison-entry p { margin: 5px 0; }
+.comparison-entry button { margin-top: 6px; }
+@media (max-width: 540px) { .comparison-grid { grid-template-columns: 1fr; } }
 table { border-collapse: collapse; width: 100%; text-align: left; }
 th, td { white-space: nowrap; padding: 10px 17px; border-bottom: 1px solid var(--line); }
 th { background: var(--canvas); color: var(--muted); font-weight: 620; }
@@ -148,9 +154,12 @@ td code { font: 12px var(--mono); }
 </section>
 <section id="history" hidden aria-labelledby="history-title">
   <div class="intro"><div><h1 id="history-title">实验记录</h1><p>按实验查看最近 50 条记录和累计判定统计。</p></div>
-    <label>筛选实验 <select id="filter"><option value="">全部实验</option></select></label>
+    <div class="tool-row">
+      <label>筛选实验 <select id="filter"><option value="">全部实验</option></select></label>
+      <button class="button" id="compare" type="button" disabled>对比最近两次</button>
+    </div>
   </div>
-  <div class="panel"><div id="counts"></div><div id="records"></div></div>
+  <div class="panel"><div id="counts"></div><section id="comparison" hidden aria-live="polite"></section><div id="records"></div></div>
 </section>
 </main>
 <script>
@@ -164,6 +173,7 @@ const labels = {
   pipe_wait:"管道 EOF 等待", file_error:"文件操作错误", memory_limit:"内存超限", sync_wait:"同步等待"
 };
 let labs = [], record, tab = "grade", polling = false, caseIndex = 0, onlyEvidence = false, viewVersion = 0;
+let historyVersion = 0, pair = [];
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -350,11 +360,61 @@ async function track(id) {
     byId("run").disabled = false;
   }
 }
+async function openRecord(id) {
+  if (polling) {
+    navigate(false);
+    notice("当前实验运行结束后可打开历史记录。");
+    return;
+  }
+  navigate(false);
+  notice();
+  onlyEvidence = false;
+  await track(id);
+}
+
+async function compareRuns() {
+  const version = historyVersion, panel = byId("comparison"), control = byId("compare");
+  if (pair.length !== 2) return;
+  control.disabled = true;
+  panel.hidden = false;
+  panel.replaceChildren(el("p", "正在读取两次实验记录…", "muted"));
+  try {
+    const runs = await Promise.all(pair.map(run => api("/api/runs/" + run.id)));
+    if (historyVersion !== version) return;
+    const after = runs[1];
+    const name = labs.find(lab => lab.id === after.lab).title;
+    const grid = el("div", undefined, "comparison-grid");
+    runs.forEach((run, i) => {
+      const {result} = run;
+      const box = el("article", undefined, "comparison-entry");
+      const evidence = result.diagnosis.evidence.length;
+      box.append(el("h3", i === 0 ? "较早一次" : "最近一次"),
+        el("p", result.passed + " / " + result.total + " 用例通过 · " + result.diagnosis.title),
+        el("p", evidence ? evidence + " 条关联证据" : "无关联轨迹证据", "muted"),
+        button("打开记录", () => openRecord(run.id)));
+      grid.append(box);
+    });
+    panel.replaceChildren(el("h2", name + " · 前后对比"), grid);
+  } catch (err) {
+    if (historyVersion === version) panel.replaceChildren(el("p", err.message, "notice"));
+  } finally {
+    if (historyVersion === version) control.disabled = false;
+  }
+}
+
 async function refreshHistory() {
+  const version = ++historyVersion;
   const selected = byId("filter").value;
+  byId("comparison").hidden = true;
+  byId("compare").disabled = true;
+  pair = [];
   try {
     const data = await api("/api/runs?" + new URLSearchParams({lab:selected}));
-    if (byId("filter").value !== selected) return;
+    if (historyVersion !== version) return;
+    const finished = data.runs.filter(run => run.state === "finished");
+    const comparable = finished.filter(run => run.lab === finished[0]?.lab);
+    pair = comparable.slice(0, 2).reverse();
+    byId("compare").disabled = pair.length !== 2;
     byId("counts").replaceChildren(...data.counts.map(c => el("span", (labels[c.outcome] || c.outcome) + " · " + c.count, "status")));
     const table = el("table"), thead = el("thead"), head = el("tr"), body = el("tbody");
     ["实验", "时间", "判定", "记录编号", "操作"].forEach(t => head.append(el("th", t)));
@@ -362,22 +422,20 @@ async function refreshHistory() {
     data.runs.forEach(run => {
       const row = el("tr"), slug = el("td"), action = el("td");
       slug.append(el("code", run.id.slice(0, 8)));
-      const open = async () => {
-        if (polling) { navigate(false); notice("当前实验运行结束后可打开历史记录。"); return; }
-        navigate(false); notice();
-        await track(run.id);
-      };
-      action.append(button("查看", open));
+      action.append(button("查看", () => openRecord(run.id)));
       row.append(el("td", labs.find(l => l.id === run.lab)?.title ?? run.lab), el("td", new Date(run.created).toLocaleString()),
         el("td", labels[run.outcome] || labels[run.state] || run.state), slug, action);
       body.append(row);
     });
     byId("records").replaceChildren(data.runs.length ? table : el("div", "运行实验后，判定和轨迹会出现在这里。", "empty"));
-  } catch (err) { byId("records").replaceChildren(el("p", err.message, "empty")); }
+  } catch (err) {
+    if (historyVersion === version) byId("records").replaceChildren(el("p", err.message, "empty"));
+  }
 }
 byId("work-tab").addEventListener("click", () => navigate(false));
 byId("history-tab").addEventListener("click", () => navigate(true));
 byId("filter").addEventListener("change", refreshHistory);
+byId("compare").addEventListener("click", compareRuns);
 byId("good").addEventListener("click", () => loadExample(false));
 byId("bad").addEventListener("click", () => loadExample(true));
 select.addEventListener("change", () => loadExample(false));
