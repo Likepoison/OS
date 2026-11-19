@@ -19,7 +19,7 @@ from labs import LABS, sample
 
 DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
-RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/(\d+))?")
+RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
 MAX_SOURCE = 32_768
 LIMIT = 8
 WORKERS = ThreadPoolExecutor(max_workers=2)
@@ -68,8 +68,9 @@ def run_job(run_id, lab, source, want_ai):
         else:
             result["feedback"] = {"source": "rules", "hints": diagnosis["hints"]}
         with database() as conn:
-            conn.execute("UPDATE runs SET state='finished', outcome=?, result=? WHERE id=?",
-                         (diagnosis["code"], json.dumps(result, ensure_ascii=False), run_id))
+            state = "finished" if result["scored"] else "platform_error"
+            conn.execute("UPDATE runs SET state=?, outcome=?, result=? WHERE id=?",
+                         (state, diagnosis["code"], json.dumps(result, ensure_ascii=False), run_id))
     except Exception:
         logging.exception("Run %s failed", run_id)
         with database() as conn:
@@ -136,28 +137,32 @@ class Handler(BaseHTTPRequestHandler):
         record = dict(row)
         result = json.loads(record.pop("result") or "null")
         if action:
-            if not result or int(index) >= len(result["cases"]):
+            index = int(index)
+            if not result or index >= len(result["cases"]):
                 return self.send_data(404, {"error": "找不到该用例的轨迹"})
-            raw = result["cases"][int(index)].get("trace", "")
+            raw = result["cases"][index].get("trace", "")
             if action == "raw":
                 return self.send_data(200, raw.encode(), "text/plain; charset=utf-8")
             events = events_from(raw)
             query = parse_qs(url.query)
             if query.get("only") == ["evidence"]:
-                ids = result["diagnosis"]["evidence"] if int(index) == result["evidence_case"] else []
+                ids = result["diagnosis"]["evidence"] if index == result["evidence_case"] else []
                 events = [event for event in events if event["id"] in ids]
             elif query.get("q", [""])[0]:
                 term = query["q"][0][:100].casefold()
                 events = [event for event in events
                           if term in event["text"].casefold() or term == str(event["pid"])]
             try:
-                page = min(10000, max(0, int(query.get("page", ["0"])[0])))
+                requested = query.get("page", ["0"])[0]
+                last = max(0, (len(events) - 1) // 40)
+                page = last if requested == "last" else min(last, max(0, int(requested)))
             except ValueError:
                 return self.send_data(400, {"error": "页码无效"})
-            return self.send_data(200, {"events": events[page * 40:(page + 1) * 40], "total": len(events)})
+            return self.send_data(200, {"events": events[page * 40:(page + 1) * 40],
+                                        "page": page, "total": len(events)})
         if result:
             for case in result["cases"]:
-                case.pop("trace", None)
+                case["trace_available"] = bool(case.pop("trace", None))
                 for group in (case, case["compile"]):
                     for stream in ("stdout", "stderr"):
                         if stream in group and len(group[stream]) > 8192:

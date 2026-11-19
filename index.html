@@ -94,7 +94,9 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .comparison-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 9px; }
 .comparison-entry { border: 1px solid var(--line); border-radius: 8px; padding: 11px; }
 .comparison-entry p { margin: 5px 0; }
-.comparison-entry button { margin-top: 6px; }
+.comparison-entry button { margin: 6px 6px 0 0; }
+.comparison-cases { padding-left: 20px; margin: 8px 0; font-size: 13px; }
+.comparison-cases li + li { margin-top: 4px; }
 @media (max-width: 540px) { .comparison-grid { grid-template-columns: 1fr; } }
 table { border-collapse: collapse; width: 100%; text-align: left; }
 th, td { white-space: nowrap; padding: 10px 17px; border-bottom: 1px solid var(--line); }
@@ -168,7 +170,8 @@ const source = byId("source"), select = byId("lab"), contents = byId("contents")
 const labels = {
   queued:"排队中", running:"编译与运行中", analyzing:"分析证据中", finished:"评测完成",
   platform_error:"平台运行失败", interrupted:"服务已中断", passed:"通过", wrong_output:"输出不符",
-  compile_error:"编译失败", runtime_error:"异常退出", trace_error:"采集异常", timeout:"运行超时",
+  compile_error:"编译失败", compile_timeout:"编译超时", runtime_error:"异常退出", signal_exit:"信号终止",
+  trace_error:"采集异常", timeout:"运行超时",
   oom:"内存超限", output_limit:"日志达到上限", missing_behavior:"缺少要求的调用",
   pipe_wait:"管道 EOF 等待", file_error:"文件操作错误", memory_limit:"内存超限", sync_wait:"同步等待"
 };
@@ -217,12 +220,22 @@ function navigate(history) {
   byId("history-tab").setAttribute("aria-pressed", String(history));
   if (history) refreshHistory();
 }
-function showTab(next) {
+function showTab(next, initialTracePage = 0) {
   tab = next;
   document.querySelectorAll("[data-tab]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tab === next)));
-  render();
+  render(initialTracePage);
 }
-function render() {
+function showFindingTrace(result) {
+  caseIndex = result.evidence_case;
+  onlyEvidence = result.diagnosis.evidence.length > 0 && result.diagnosis.confidence !== "insufficient";
+  showTab("trace", onlyEvidence ? 0 : "last");
+}
+function traceActionLabel(result) {
+  if (!result.cases[result.evidence_case]?.trace_available) return "";
+  if (result.diagnosis.evidence.length && result.diagnosis.confidence !== "insufficient") return "查看关联事件";
+  return result.passed !== result.total ? "查看末尾轨迹" : "";
+}
+function render(initialTracePage = 0) {
   const version = ++viewVersion;
   contents.replaceChildren();
   const result = record?.result;
@@ -239,11 +252,12 @@ function render() {
     contents.append(box);
     return;
   }
-  const ok = result.passed === result.total;
-  badge.textContent = result.passed + " / " + result.total + " 通过";
+  const scored = result.scored !== false;
+  const ok = scored && result.passed === result.total;
+  badge.textContent = scored ? result.passed + " / " + result.total + " 通过" : "采集异常 · 本次不计分";
   badge.classList.add(ok ? "good" : "warn");
   if (tab === "trace") {
-    traceView(result, version);
+    traceView(result, version, initialTracePage);
     return;
   }
   if (tab === "hints") {
@@ -256,6 +270,7 @@ function render() {
       item.append(el("summary", ["观察方向", "相关原理", "证据定位"][i]), el("p", hint));
       contents.append(item);
     });
+    if (traceActionLabel(result)) contents.append(button(traceActionLabel(result), () => showFindingTrace(result)));
     return;
   }
   const diagnosis = result.diagnosis;
@@ -267,9 +282,7 @@ function render() {
   if (!ok) box.append(el("p", confidence[diagnosis.confidence] + " · " +
     (diagnosis.evidence.length ? "关联 " + diagnosis.evidence.length + " 条轨迹事件" : "依据测试判定")));
   if (diagnosis.detail) box.append(el("p", diagnosis.detail));
-  if (diagnosis.evidence.length) box.append(button("查看关联事件", () => {
-    caseIndex = result.evidence_case; onlyEvidence = true; showTab("trace");
-  }));
+  if (traceActionLabel(result)) box.append(button(traceActionLabel(result), () => showFindingTrace(result)));
   contents.append(box);
   result.cases.forEach((test, i) => {
     const details = el("details", undefined, "case");
@@ -277,8 +290,11 @@ function render() {
     const elapsed = test.duration_ms === undefined ? "" : " · " + test.duration_ms + " ms";
     details.append(el("summary", test.name + " · " + (labels[test.status] || test.status) + elapsed));
     const code = test.compile;
-    if (test.status === "compile_error") details.append(el("pre", code.stderr || "编译过程未正常结束"));
+    if (test.status === "compile_error" || test.status === "compile_timeout") {
+      details.append(el("pre", code.stderr || "编译过程未正常结束"));
+    }
     else {
+      if (test.stdin !== undefined) details.append(el("p", "用例输入", "muted"), el("pre", test.stdin || "（空输入）"));
       const expectedLabel = ["mutex", "deadlock"].includes(record.lab) ? "预期输出（工作线程行顺序不限）" : "预期输出";
       details.append(el("p", expectedLabel, "muted"), el("pre", test.expected || "（空输出）"));
       details.append(el("p", "实际输出", "muted"), el("pre", test.stdout || "（空输出）"));
@@ -287,7 +303,7 @@ function render() {
     contents.append(details);
   });
 }
-function traceView(result, version) {
+function traceView(result, version, initialPage) {
   const tools = el("div", undefined, "trace-tools"), picker = el("select");
   picker.setAttribute("aria-label", "轨迹用例");
   result.cases.forEach((test, i) => {
@@ -304,6 +320,7 @@ function traceView(result, version) {
   });
   filter.disabled = !(caseIndex === result.evidence_case && result.diagnosis.evidence.length);
   raw.href = base + "/raw/" + caseIndex;
+  raw.hidden = !result.cases[caseIndex]?.trace_available;
   picker.addEventListener("change", () => { caseIndex = Number(picker.value); onlyEvidence = false; showTab("trace"); });
   tools.append(picker, search, filter, raw);
   contents.append(tools);
@@ -329,15 +346,16 @@ function traceView(result, version) {
           (ev.duration_us != null ? " · " + ev.duration_us + " µs" : "")), el("pre", ev.text));
         events.append(row);
       }
-      const previous = button("上一页", () => load(page - 1)), next = button("下一页", () => load(page + 1));
-      previous.disabled = page === 0; next.disabled = (page + 1) * 40 >= data.total;
+      const previous = button("上一页", () => load(data.page - 1));
+      const next = button("下一页", () => load(data.page + 1));
+      previous.disabled = data.page === 0; next.disabled = (data.page + 1) * 40 >= data.total;
       if (data.total) pager.append(previous, el("span", "共 " + data.total + " 条", "muted"), next);
     } catch (err) {
       if (seq === requests && version === viewVersion) events.replaceChildren(el("p", err.message, "notice"));
     }
   }
   search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => load(0), 180); });
-  load(0);
+  load(initialPage);
 }
 async function track(id) {
   polling = true;
@@ -360,7 +378,7 @@ async function track(id) {
     byId("run").disabled = false;
   }
 }
-async function openRecord(id) {
+async function openRecord(id, openTrace = false) {
   if (polling) {
     navigate(false);
     notice("当前实验运行结束后可打开历史记录。");
@@ -370,6 +388,7 @@ async function openRecord(id) {
   notice();
   onlyEvidence = false;
   await track(id);
+  if (openTrace && record?.id === id && record.result) showFindingTrace(record.result);
 }
 
 async function compareRuns() {
@@ -388,10 +407,15 @@ async function compareRuns() {
       const {result} = run;
       const box = el("article", undefined, "comparison-entry");
       const evidence = result.diagnosis.evidence.length;
+      const cases = el("ul", undefined, "comparison-cases");
+      result.cases.forEach(test => cases.append(el("li", test.name + " · " + (labels[test.status] || test.status))));
+      if (result.cases.length < result.total) cases.append(el("li", "其余用例未运行"));
       box.append(el("h3", i === 0 ? "较早一次" : "最近一次"),
         el("p", result.passed + " / " + result.total + " 用例通过 · " + result.diagnosis.title),
+        cases,
         el("p", evidence ? evidence + " 条关联证据" : "无关联轨迹证据", "muted"),
         button("打开记录", () => openRecord(run.id)));
+      if (traceActionLabel(result)) box.append(button(traceActionLabel(result), () => openRecord(run.id, true)));
       grid.append(box);
     });
     panel.replaceChildren(el("h2", name + " · 前后对比"), grid);
@@ -412,8 +436,10 @@ async function refreshHistory() {
     const data = await api("/api/runs?" + new URLSearchParams({lab:selected}));
     if (historyVersion !== version) return;
     const finished = data.runs.filter(run => run.state === "finished");
-    const comparable = finished.filter(run => run.lab === finished[0]?.lab);
-    pair = comparable.slice(0, 2).reverse();
+    const counts = new Map();
+    for (const run of finished) counts.set(run.lab, (counts.get(run.lab) || 0) + 1);
+    const comparable = finished.find(run => counts.get(run.lab) > 1);
+    pair = finished.filter(run => run.lab === comparable?.lab).slice(0, 2).reverse();
     byId("compare").disabled = pair.length !== 2;
     byId("counts").replaceChildren(...data.counts.map(c => el("span", (labels[c.outcome] || c.outcome) + " · " + c.count, "status")));
     const table = el("table"), thead = el("thead"), head = el("tr"), body = el("tbody");
@@ -443,13 +469,15 @@ source.addEventListener("input", lines);
 source.addEventListener("scroll", () => { byId("numbers").scrollTop = source.scrollTop; });
 document.querySelectorAll("[data-tab]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.tab)));
 byId("run").addEventListener("click", async () => {
+  if (polling) return;
+  polling = true;
   notice(); byId("run").disabled = true;
   try {
     const queued = await api("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({lab:select.value, source:source.value, ai:byId("ai").checked})});
     onlyEvidence = false;
     await track(queued.id);
-  } catch (err) { notice(err.message); byId("run").disabled = false; }
+  } catch (err) { notice(err.message); polling = false; byId("run").disabled = false; }
 });
 render();
 api("/api/labs").then(data => {

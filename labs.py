@@ -74,7 +74,7 @@ LABS = {
         """,
         ("if (lseek(fd, 0, SEEK_SET) < 0) return 3;", "close(fd);\n    if (lseek(fd, 0, SEEK_SET) < 0) return 3;"),
         ("file demo\n", "file demo\n"), ("", ""),
-        (("openat", "open"), ("lseek",), ("read",)),
+        (),
     ),
     "mutex": lab(
         "线程同步", "两个工作线程各增加共享计数 N 次，各自用一次 write 输出 worker A 或 worker B（顺序不限）。主线程等待两者结束后输出 2N。",

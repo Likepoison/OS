@@ -49,9 +49,18 @@ class Demo(TestCase):
                     page.get_by_role("button", name="故障样例").click()
                     if live:
                         page.get_by_label("请求 AI 提示").check()
-                    with page.expect_response(lambda response: response.request.method == "POST" and
-                                              response.url.endswith("/api/runs")) as submitted:
-                        run.click()
+                    held = []
+                    def is_submission(request):
+                        return request.method == "POST" and request.url.endswith("/api/runs")
+
+                    page.route("**/api/runs", held.append)
+                    with page.expect_response(lambda response: is_submission(response.request)) as submitted:
+                        with page.expect_request(is_submission):
+                            run.click()
+                        page.get_by_role("button", name="正确样例").click()
+                        expect(run).to_be_disabled()
+                        held[0].continue_()
+                    page.unroute("**/api/runs")
                     run_id = submitted.value.json()["id"]
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible(timeout=30000)
                     page.get_by_role("button", name="查看关联事件").click()
@@ -81,14 +90,34 @@ class Demo(TestCase):
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
                     page.get_by_role("button", name="对比最近两次").click()
-                    expect(page.get_by_role("heading", name="进程与管道 · 前后对比")).to_be_visible()
-                    expect(page.locator("#comparison").get_by_text("0 / 2 用例通过", exact=False)).to_be_visible()
-                    expect(page.locator("#comparison").get_by_text("2 / 2 用例通过", exact=False)).to_be_visible()
+                    compare = page.locator("#comparison")
+                    expect(compare.get_by_role("heading", name="进程与管道 · 前后对比")).to_be_visible()
+                    expect(compare.get_by_text("0 / 2 用例通过", exact=False)).to_be_visible()
+                    expect(compare.get_by_text("2 / 2 用例通过", exact=False)).to_be_visible()
+                    expect(compare.get_by_text("常规用例 · 运行超时")).to_be_visible()
+                    expect(compare.get_by_text("边界用例 · 通过")).to_be_visible()
                     if out:
                         page.screenshot(path=f"{out}/comparison.png", full_page=True)
+                    compare.get_by_role("button", name="查看关联事件").click()
+                    expect(page.locator(".event.evidence").first).to_be_visible()
+                    page.get_by_role("button", name="实验记录").click()
                     page.get_by_role("button", name="查看", exact=True).last.click()
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible()
 
+                    page.get_by_role("textbox", name="C 源代码").fill("int main(void) {for (;;) {}}")
+                    with page.expect_response(lambda response: is_submission(response.request)) as unknown:
+                        run.click()
+                    unknown_id = unknown.value.json()["id"]
+                    expect(page.get_by_role("heading", name="超过运行时限")).to_be_visible(timeout=30000)
+                    expect(page.get_by_text("证据不足", exact=False)).to_be_visible()
+                    expect(page.get_by_text("用例输入", exact=True).first).to_be_visible()
+                    with page.expect_response(lambda response: "page=last" in response.url) as tail:
+                        page.get_by_role("button", name="查看末尾轨迹").click()
+                    self.assertGreater(tail.value.json()["total"], 0)
+                    expect(page.locator(".event").last).to_be_visible()
+                    expect(page.get_by_role("button", name="下一页")).to_be_disabled()
+                    bad_path = f"http://127.0.0.1:8000/api/runs/{unknown_id}/events/" + "9" * 4500
+                    self.assertEqual(page.request.get(bad_path).status, 404)
                     page.set_viewport_size({"width": 390, "height": 844})
                     self.assertTrue(page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
                     if out:
