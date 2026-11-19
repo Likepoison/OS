@@ -35,6 +35,17 @@ class Evaluation(TestCase):
         events = events_from(raw + "11  1.000005 close(4) = 0\n")
         self.assertIsNone(pipe_wait(events, events[3]))
 
+    def test_padded_dup_result_preserves_pipe_write_end(self):
+        events = events_from(
+            "16  1.000001 pipe2([3, 4], 0) = 0\n"
+            "16  1.000002 dup(4)          = 5 <0.000019>\n"
+            "16  1.000003 close(4)        = 0 <0.000052>\n"
+            "16  1.000004 read(3, "
+        )
+        self.assertEqual((events[1]["kind"], events[1]["result"]), ("syscall", "5"))
+        _, owners = pipe_wait(events, events[-1])
+        self.assertEqual(owners, [(16, 5)])
+
     def test_sandbox_uses_separate_identity(self):
         code = '#include <unistd.h>\n#include <stdio.h>\n'
         code += 'int main(void){printf("%ld\\n",(long)getuid());return access("/tmp/control/trace", W_OK)==0;}'

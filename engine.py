@@ -79,8 +79,9 @@ def events_from(raw):
             row["kind"] = "signal" if body.startswith("---") else "exit" if body.startswith("+++") else "other"
             continue
         row.update(kind="syscall", call=called[1])
-        args, sep, returned = row["text"].rpartition(") = ")
-        if sep:
+        completed = re.fullmatch(r"(.*)\)\s+=\s+(.*)", row["text"])
+        if completed:
+            args, returned = completed.groups()
             timing = DURATION.search(returned)
             row["duration_us"] = round(float(timing[1]) * 1_000_000) if timing else None
             returned = DURATION.sub("", returned)
