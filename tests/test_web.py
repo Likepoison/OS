@@ -40,10 +40,14 @@ class Demo(TestCase):
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
                     page.goto("http://127.0.0.1:8000")
+                    expect(page).to_have_title("循迹 OS · 操作系统实验工作台")
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
                     pet = page.get_by_role("button", name="排错鸭助教")
                     pet_panel = page.get_by_role("complementary", name="排错鸭助教")
+                    pet_bubble = page.locator("#pet-bubble")
+                    expect(pet_bubble).to_be_visible()
+                    expect(pet_bubble).to_contain_text("我是排错鸭")
                     pet.hover()
                     expect(pet.locator("img")).to_have_attribute("src", "/pet/duck-wave.gif")
                     original = pet.bounding_box()
@@ -63,11 +67,28 @@ class Demo(TestCase):
                     expect(pet_panel.get_by_role("status")).to_contain_text("再想一步")
                     pet_panel.get_by_role("button", name="最后一个写端被关闭后").click()
                     expect(pet_panel.get_by_role("status")).to_contain_text("答对啦")
-                    user_text = '<img src=x onerror=alert(1)>'
+                    user_text = "<b>无关内容</b>"
+                    requests = []
+                    def collect(request):
+                        requests.append(request)
+
+                    page.on("request", collect)
                     pet_panel.get_by_role("textbox", name="问排错鸭").fill(user_text)
                     pet_panel.get_by_role("textbox", name="问排错鸭").press("Enter")
                     expect(pet_panel.get_by_role("status")).to_contain_text("我可以陪你看本次结果")
                     self.assertNotIn(user_text, pet_panel.inner_text())
+                    self.assertTrue(all(req.method == "GET" and "/pet/" in req.url for req in requests))
+                    page.remove_listener("request", collect)
+                    pet_panel.get_by_role("button", name="回到角落").click()
+                    self.assertEqual(pet.bounding_box()["x"], original["x"])
+                    pet_panel.get_by_role("button", name="隐藏桌宠").click()
+                    expect(pet).to_be_hidden()
+                    expect(pet_bubble).to_be_hidden()
+                    expect(pet_panel).to_be_hidden()
+                    page.get_by_role("button", name="显示助教").click()
+                    expect(pet).to_be_visible()
+                    expect(pet_bubble).to_be_visible()
+                    pet.click()
                     page.keyboard.press("Escape")
                     expect(pet_panel).to_be_hidden()
                     expect(pet).to_be_focused()
@@ -82,18 +103,20 @@ class Demo(TestCase):
                     def is_submission(request):
                         return request.method == "POST" and request.url.endswith("/api/runs")
 
-                    page.route("**/api/runs", held.append)
+                    page.route("**/api/runs", lambda route: held.append(route))
                     with page.expect_response(lambda response: is_submission(response.request)) as submitted:
                         with page.expect_request(is_submission):
                             run.click()
                         page.get_by_role("button", name="正确样例").click()
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
+                        expect(pet_bubble).to_be_visible()
                         held[0].continue_()
                     page.unroute("**/api/runs")
                     run_id = submitted.value.json()["id"]
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible(timeout=30000)
                     expect(pet).to_have_attribute("data-mood", "review")
+                    expect(pet_bubble).to_contain_text("有运行线索")
                     pet.click()
                     expect(pet_panel.get_by_role("status")).to_contain_text("有运行线索")
                     if out:
@@ -126,6 +149,7 @@ class Demo(TestCase):
                     run.click()
                     expect(page.get_by_text("2 / 2 通过", exact=True)).to_be_visible(timeout=30000)
                     expect(pet).to_have_attribute("data-mood", "success")
+                    expect(pet_bubble).to_contain_text("全部用例通过")
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
                     page.get_by_role("button", name="对比最近两次").click()

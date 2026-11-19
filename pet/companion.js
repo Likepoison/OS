@@ -19,17 +19,25 @@ const duckLessons = {
     ["只能判断系统已经崩溃", "只要等待就能确认", "还需要检查线程间的等待关系"], 2,
     "正常同步和死锁都可能出现等待。多线程死锁需要结合锁持有情况和等待关系。"]
 };
+const duckClues = {
+  pipe_wait: "读端还在等，轨迹里也有写端仍可能打开的线索。先看关联事件里是哪一个进程和描述符。",
+  sync_wait: "一条工作线程的等待调用还没有返回。先找这条调用，想想谁有机会结束这次等待。",
+  file_error: "实验文件的调用返回了错误。看一眼 errno，再往前找同一文件或描述符的状态。",
+  memory_limit: "这次触发了内存限额。对照用例输入和程序请求的字节数，从分配和实际访问的区别想起。",
+  signal_exit: "轨迹确认了使主进程退出的信号。先看退出事件，再向前找最后一次正常调用。"
+};
 
-function makeCompanion() {
+function makeCompanion(activeLab, openResult) {
   const avatar = byId("pet-launch"), panel = byId("pet-panel");
+  const bubble = byId("pet-bubble"), reset = byId("pet-reset");
   const sprite = avatar.querySelector("img"), message = byId("pet-reply");
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const input = byId("pet-input"), reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let activeRun, lastUpdate, mood = "idle", hover = false, drag, moved = false, position;
-  let celebration;
+  let celebration, bubbleTimer;
 
   function updateSprite() {
-    const file = reducedMotion.matches ? "duck.png"
+    const file = avatar.hidden || reducedMotion.matches ? "duck.png"
       : drag?.active || mood === "working" ? "duck-walk.gif"
       : hover || celebration ? "duck-wave.gif" : "duck.png";
     if (sprite.getAttribute("src") !== "/pet/" + file) sprite.src = "/pet/" + file;
@@ -38,6 +46,7 @@ function makeCompanion() {
   }
 
   function celebrate() {
+    if (avatar.hidden) return;
     clearTimeout(celebration);
     celebration = setTimeout(() => { celebration = undefined; updateSprite(); }, 1050);
     updateSprite();
@@ -45,23 +54,37 @@ function makeCompanion() {
 
   function speak(text) {
     message.textContent = text;
-    placePanel();
+    place(panel);
   }
 
-  function placePanel() {
-    if (panel.hidden) return;
+  function hideBubble() {
+    clearTimeout(bubbleTimer);
+    bubble.hidden = true;
+  }
+
+  function announce() {
+    if (avatar.hidden || !panel.hidden) return;
+    hideBubble();
+    bubble.hidden = false;
+    bubble.textContent = message.textContent;
+    place(bubble);
+    bubbleTimer = setTimeout(hideBubble, 5300);
+  }
+
+  function place(floating) {
+    if (floating.hidden) return;
     const {left, top, right, bottom} = avatar.getBoundingClientRect();
-    const gap = 12, width = panel.offsetWidth, height = panel.offsetHeight;
+    const gap = 12, width = floating.offsetWidth, height = floating.offsetHeight;
     const above = top - height - gap;
     const x = Math.max(gap, Math.min(innerWidth - width - gap, right - width));
     if (above >= gap || bottom + gap + height <= innerHeight - gap) {
-      panel.style.left = x + "px";
-      panel.style.top = (above >= gap ? above : bottom + gap) + "px";
+      floating.style.left = x + "px";
+      floating.style.top = (above >= gap ? above : bottom + gap) + "px";
       return;
     }
     const beside = left - width - gap;
-    panel.style.left = (beside >= gap ? beside : x) + "px";
-    panel.style.top = Math.max(gap, innerHeight - height - gap) + "px";
+    floating.style.left = (beside >= gap ? beside : x) + "px";
+    floating.style.top = Math.max(gap, innerHeight - height - gap) + "px";
   }
 
   function move(x, y) {
@@ -73,30 +96,28 @@ function makeCompanion() {
     avatar.style.top = position.y + "px";
     avatar.style.right = "auto";
     avatar.style.bottom = "auto";
-    placePanel();
+    reset.hidden = false;
+    place(panel);
+    place(bubble);
   }
 
   function setOpen(open, focus = true) {
     panel.hidden = !open;
     avatar.setAttribute("aria-expanded", String(open));
     if (open) {
-      placePanel();
+      hideBubble();
+      place(panel);
       if (focus) byId("pet-title").focus();
     } else if (focus) avatar.focus();
   }
 
-  function openResult(kind) {
-    const result = activeRun?.result;
-    if (!result || activeRun.id !== record?.id) return;
+  function reveal(kind) {
     setOpen(false, false);
-    navigate(false);
-    if (kind === "trace") showFindingTrace(result);
-    else showTab(kind);
-    document.querySelector('[data-tab="' + (kind === "hints" ? "hints" : "trace") + '"]').focus();
+    openResult(activeRun.id, kind);
   }
 
   function showQuiz() {
-    const lesson = duckLessons[select.value];
+    const lesson = duckLessons[activeLab()];
     if (!lesson) return speak("选择一个实验，我就能给你出一道相关的小题。");
     const [question, options, correct, explanation] = lesson;
     speak("来做一道概念题。答错了也可以再试。");
@@ -108,25 +129,25 @@ function makeCompanion() {
         quiz.hidden = true;
         byId("pet-quiz-start").focus();
         celebrate();
-        placePanel();
+        place(panel);
       }
     })));
     quiz.hidden = false;
     choices.firstElementChild.focus();
-    placePanel();
+    place(panel);
   }
 
   function respond(text) {
     if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
     if (/deepseek|\bai\b|提示|线索/i.test(text)) {
-      if (activeRun?.result?.feedback.source === "ai") return speak("这次有 DeepSeek 的分层提问。可以打开提示，沿着引用回看系统调用。");
+      if (activeRun?.ai) return speak("这次有 DeepSeek 的分层提问。可以打开提示，沿着引用回看系统调用。");
       return speak("先试试分层提示。勾选「请求 AI 提示」运行后，有可用证据时会尝试请 DeepSeek 帮你提问。");
     }
     if (/错误|失败|超时|证据|轨迹|结果|通过/.test(text)) {
-      if (!activeRun?.result) return speak("运行一次实验，我再陪你看判定和系统调用。");
-      return speak(activeRun.result.diagnosis.confidence === "insufficient"
+      if (!activeRun?.hasResult) return speak("运行一次实验，我再陪你看判定和系统调用。");
+      return speak(duckClues[activeRun.code] || (activeRun.confidence === "insufficient"
         ? "目前能确认的线索有限。先看末尾轨迹，找找最后哪条调用返回了。"
-        : "先打开运行分析，看看用例结果和系统调用能否互相印证。");
+        : "先打开运行分析，看看用例结果和系统调用能否互相印证。"));
     }
     if (/管道|eof|描述符|死锁|内存|线程|调度|futex|mmap/i.test(text)) {
       return speak("我们可以从当前实验的一道概念题开始，再用轨迹验证你的判断。");
@@ -140,26 +161,24 @@ function makeCompanion() {
     if (key === lastUpdate) return;
     lastUpdate = key;
     activeRun = run;
-    const result = run?.result;
     const contextButtons = [button("来道小测", showQuiz)];
     contextButtons[0].id = "pet-quiz-start";
-    if (result) {
-      if (traceActionLabel(result)) contextButtons.push(button(traceActionLabel(result), () => openResult("trace")));
-      contextButtons.push(button(result.feedback.source === "ai" ? "打开 DeepSeek 提示" : "打开分层提示",
-                                 () => openResult("hints")));
+    if (run?.hasResult) {
+      if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
+      contextButtons.push(button(run.ai ? "打开 DeepSeek 提示" : "打开分层提示", () => reveal("hints")));
     }
     actions.replaceChildren(...contextButtons);
     mood = "idle";
     if (run?.state === "platform_error") {
       mood = "review";
       speak("这次平台没能完成观测。可以查看运行记录，等环境正常后再试。");
-    } else if (result && result.passed === result.total) {
+    } else if (run?.passed) {
       mood = "success";
       speak("全部用例通过啦！要不要用一道概念题复习刚才的操作？");
       celebrate();
-    } else if (result) {
+    } else if (run?.hasResult) {
       mood = "review";
-      speak(result.diagnosis.confidence === "insufficient"
+      speak(run.confidence === "insufficient"
         ? "这次线索还不够。我们可以从最后几条调用开始找。"
         : "先歇一口气。我们有运行线索，可以打开结果一步一步看。");
     } else if (run) {
@@ -169,6 +188,7 @@ function makeCompanion() {
       speak("嗨，我是排错鸭。可以陪你看实验线索，也可以带你做一道小测。");
     }
     updateSprite();
+    announce();
   }
 
   avatar.addEventListener("pointerenter", () => { hover = true; updateSprite(); });
@@ -212,22 +232,49 @@ function makeCompanion() {
   });
   window.addEventListener("resize", () => {
     if (position) move(position.x, position.y);
-    else placePanel();
+    else {
+      place(panel);
+      place(bubble);
+    }
   });
   document.addEventListener("keydown", event => {
     if (event.key === "Escape" && !panel.hidden) setOpen(false);
   });
   byId("pet-close").addEventListener("click", () => setOpen(false));
+  const restore = byId("pet-restore");
+  byId("pet-hide").addEventListener("click", () => {
+    setOpen(false, false);
+    hideBubble();
+    avatar.hidden = true;
+    restore.hidden = false;
+    hover = false;
+    updateSprite();
+    restore.focus();
+  });
+  restore.addEventListener("click", () => {
+    restore.hidden = true;
+    avatar.hidden = false;
+    updateSprite();
+    announce();
+    avatar.focus();
+  });
+  reset.addEventListener("click", () => {
+    position = undefined;
+    for (const side of ["left", "top", "right", "bottom"]) avatar.style.removeProperty(side);
+    reset.hidden = true;
+    place(panel);
+    byId("pet-close").focus();
+  });
   byId("pet-form").addEventListener("submit", event => {
     event.preventDefault();
     const text = input.value.trim();
     input.value = "";
     if (text) respond(text);
   });
-  select.addEventListener("change", () => { quiz.hidden = true; placePanel(); });
+  select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   reducedMotion.addEventListener("change", updateSprite);
-  update(record);
   return {update};
 }
 
-companion = makeCompanion();
+companion = makeCompanion(() => select.value, openPetResult);
+companion.update(petSnapshot(record));

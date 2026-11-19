@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TraceTutor · 操作系统实验工作台</title>
+<title>循迹 OS · 操作系统实验工作台</title>
+<link rel="icon" href="/pet/duck.png" type="image/png">
 <style>
 :root {
   color-scheme: light;
@@ -116,6 +117,9 @@ td code { font: 12px var(--mono); }
   max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain;
   padding: 15px; border: 1px solid var(--line); border-radius: 17px;
   background: var(--paper); box-shadow: 0 10px 28px oklch(.30 .05 266 / .16); }
+.pet-bubble { position: fixed; z-index: 2; width: min(258px, calc(100vw - 24px));
+  padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
+  box-shadow: 0 4px 18px oklch(.30 .05 266 / .10); font-size: 13px; pointer-events: none; }
 .pet-head, .pet-form { display: flex; align-items: center; gap: 8px; }
 .pet-head { justify-content: space-between; }
 .pet-head h2 { margin: 0; }
@@ -128,6 +132,7 @@ td code { font: 12px var(--mono); }
 .pet-quiz button { display: flex; width: 100%; margin-bottom: 5px; text-align: left; }
 .pet-quiz button:disabled { cursor: default; }
 .pet-help { margin-top: 9px; }
+.pet-controls { display: flex; flex-wrap: wrap; gap: 12px; }
 @media (max-width: 850px) {
   .grid { grid-template-columns: 1fr; }
   .editor { height: 370px; }
@@ -145,12 +150,13 @@ td code { font: 12px var(--mono); }
 </head>
 <body>
 <header><div class="bar">
-  <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span>TraceTutor</div>
+  <div class="brand"><span class="mark" aria-hidden="true">&gt;_</span>循迹 OS</div>
   <nav aria-label="页面">
     <button type="button" class="tab" id="work-tab" aria-pressed="true">实验工作台</button>
     <button type="button" class="tab" id="history-tab" aria-pressed="false">实验记录</button>
   </nav>
   <span class="runtime">Linux · C · strace</span>
+  <button type="button" class="button" id="pet-restore" hidden>显示助教</button>
 </div></header>
 <main>
 <section id="workspace" aria-labelledby="work-title">
@@ -194,6 +200,7 @@ td code { font: 12px var(--mono); }
   aria-expanded="false" title="排错鸭助教 · 点击打开，可拖动">
   <img src="/pet/duck.png" alt="" width="48" height="48" draggable="false">
 </button>
+<p id="pet-bubble" class="pet-bubble" role="status" hidden></p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>
   <div class="pet-head"><h2 id="pet-title" tabindex="-1">排错鸭助教</h2>
     <button id="pet-close" class="button" type="button">收起</button></div>
@@ -203,6 +210,8 @@ td code { font: 12px var(--mono); }
   <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问排错鸭" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
   <p class="muted pet-help">可拖动小鸭。键盘聚焦后用方向键移动，Esc 收起。</p>
+  <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
+    <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
 </aside>
 <script>
 const byId = id => document.getElementById(id);
@@ -276,8 +285,29 @@ function traceActionLabel(result) {
   if (result.diagnosis.evidence.length && result.diagnosis.confidence !== "insufficient") return "查看关联事件";
   return result.passed !== result.total ? "查看末尾轨迹" : "";
 }
+function petSnapshot(run) {
+  if (!run) return null;
+  const result = run.result;
+  return {
+    id: run.id,
+    state: run.state,
+    hasResult: Boolean(result),
+    passed: Boolean(result && result.scored !== false && result.passed === result.total),
+    code: result?.diagnosis.code,
+    confidence: result?.diagnosis.confidence,
+    ai: result?.feedback.source === "ai",
+    traceLabel: result ? traceActionLabel(result) : ""
+  };
+}
+function openPetResult(id, kind) {
+  if (id !== record?.id || !record.result) return;
+  navigate(false);
+  if (kind === "trace") showFindingTrace(record.result);
+  else if (kind === "hints") showTab("hints");
+  document.querySelector('[data-tab="' + (kind === "trace" ? "trace" : "hints") + '"]').focus();
+}
 function render(initialTracePage = 0) {
-  companion?.update(record);
+  companion?.update(petSnapshot(record));
   const version = ++viewVersion;
   contents.replaceChildren();
   const result = record?.result;
@@ -522,7 +552,7 @@ byId("run").addEventListener("click", async () => {
     await track(queued.id);
   } catch (err) {
     notice(err.message); polling = false; byId("run").disabled = false;
-    companion?.update(record);
+    companion?.update(petSnapshot(record));
   }
 });
 render();
