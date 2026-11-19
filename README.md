@@ -12,6 +12,8 @@ python app.py
 
 在 **Ports** 中打开 8000 端口的私有预览。建议演示「进程与管道」故障样例，运行后打开关联事件与分层提示，再切换正确样例重跑并查看实验记录。演示结束后停止 Codespace。
 
+如果网页 IDE 连接缓慢，在 [Your Codespaces](https://github.com/codespaces) 选择同一个 Codespace，使用 **Open in → Visual Studio Code**。桌面 VS Code 需安装 GitHub Codespaces 扩展并登录，终端依然运行在远端。
+
 有 Docker 的 Linux 虚拟机也可运行。要求 Docker 支持 cgroup v2，Python 3.10 或更新版本。
 
 ```bash
