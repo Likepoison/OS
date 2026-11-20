@@ -21,9 +21,7 @@ DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
-    "/pet/duck.png": "image/png",
-    "/pet/duck-walk.gif": "image/gif",
-    "/pet/duck-wave.gif": "image/gif",
+    "/pet/whale-girl.png": "image/png",
 }
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
 MAX_SOURCE = 32_768

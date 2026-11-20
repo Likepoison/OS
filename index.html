@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>循迹 OS · 操作系统实验工作台</title>
-<link rel="icon" href="/pet/duck.png" type="image/png">
+<link rel="icon" href="/pet/whale-girl.png" type="image/png">
 <style>
 :root {
   color-scheme: light;
@@ -109,10 +109,19 @@ td code { font: 12px var(--mono); }
   cursor: grab; touch-action: none; user-select: none; }
 .pet-launch:hover, .pet-launch[aria-expanded="true"] { background: var(--soft); border-color: var(--indigo); }
 .pet-launch.dragging { cursor: grabbing; }
-.pet-launch img { width: 48px; height: 48px; object-fit: contain; image-rendering: pixelated; pointer-events: none; }
+.pet-launch img { width: 54px; height: 54px; object-fit: contain; pointer-events: none; }
 .pet-launch[data-mood="working"] { border-color: var(--indigo); }
 .pet-launch[data-mood="success"] { border-color: var(--teal); background: var(--teal-bg); }
 .pet-launch[data-mood="review"] { border-color: var(--amber); background: var(--amber-bg); }
+@media (prefers-reduced-motion: no-preference) {
+  .pet-launch img { transition: transform .18s ease-out; }
+  .pet-launch:hover img { transform: translateY(-3px) rotate(-4deg); }
+  .pet-launch.dragging img { animation: none; transform: rotate(8deg); }
+  .pet-launch[data-mood="working"]:not(.dragging) img { animation: pet-work 1.5s ease-in-out infinite; }
+  .pet-launch.cheering:not(.dragging) img { animation: pet-cheer .48s ease-out; }
+}
+@keyframes pet-work { 50% { transform: translateY(-3px); } }
+@keyframes pet-cheer { 45% { transform: translateY(-6px) rotate(-5deg); } }
 .pet-panel { position: fixed; z-index: 2; width: min(344px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain;
   padding: 15px; border: 1px solid var(--line); border-radius: 17px;
@@ -196,20 +205,20 @@ td code { font: 12px var(--mono); }
   <div class="panel"><div id="counts"></div><section id="comparison" hidden aria-live="polite"></section><div id="records"></div></div>
 </section>
 </main>
-<button id="pet-launch" class="pet-launch" type="button" aria-label="排错鸭助教" aria-controls="pet-panel"
-  aria-expanded="false" title="排错鸭助教 · 点击打开，可拖动">
-  <img src="/pet/duck.png" alt="" width="48" height="48" draggable="false">
+<button id="pet-launch" class="pet-launch" type="button" aria-label="鲸鱼娘助教" aria-controls="pet-panel"
+  aria-expanded="false" title="鲸鱼娘助教 · 点击打开，可拖动">
+  <img src="/pet/whale-girl.png" alt="" width="54" height="54" draggable="false">
 </button>
 <p id="pet-bubble" class="pet-bubble" role="status" hidden></p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>
-  <div class="pet-head"><h2 id="pet-title" tabindex="-1">排错鸭助教</h2>
+  <div class="pet-head"><h2 id="pet-title" tabindex="-1">鲸鱼娘助教</h2>
     <button id="pet-close" class="button" type="button">收起</button></div>
   <p id="pet-reply" class="pet-reply" role="status"></p>
   <div class="tool-row" id="pet-actions"></div>
   <fieldset class="pet-quiz" id="pet-quiz" hidden><legend id="pet-question"></legend><div id="pet-choices"></div></fieldset>
-  <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问排错鸭" maxlength="100"
+  <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问鲸鱼娘" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
-  <p class="muted pet-help">可拖动小鸭。键盘聚焦后用方向键移动，Esc 收起。</p>
+  <p class="muted pet-help">可拖动桌宠。键盘聚焦后用方向键移动，Esc 收起。</p>
   <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
     <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
 </aside>

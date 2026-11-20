@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -43,13 +44,17 @@ class Demo(TestCase):
                     expect(page).to_have_title("循迹 OS · 操作系统实验工作台")
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
-                    pet = page.get_by_role("button", name="排错鸭助教")
-                    pet_panel = page.get_by_role("complementary", name="排错鸭助教")
+                    pet = page.get_by_role("button", name="鲸鱼娘助教")
+                    pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
+                    portrait = pet.locator("img")
+                    expect(portrait).to_have_attribute("src", "/pet/whale-girl.png")
+                    self.assertEqual(portrait.evaluate("(img) => img.naturalWidth"), 144)
                     pet_bubble = page.locator("#pet-bubble")
                     expect(pet_bubble).to_be_visible()
-                    expect(pet_bubble).to_contain_text("我是排错鸭")
+                    expect(pet_bubble).to_contain_text("我是鲸鱼娘助教")
+                    page.emulate_media(reduced_motion="no-preference")
                     pet.hover()
-                    expect(pet.locator("img")).to_have_attribute("src", "/pet/duck-wave.gif")
+                    expect(portrait).to_have_css("transform", re.compile(r"^matrix\("))
                     original = pet.bounding_box()
                     page.mouse.down()
                     page.mouse.move(original["x"] - 70, original["y"] - 60, steps=5)
@@ -73,8 +78,8 @@ class Demo(TestCase):
                         requests.append(request)
 
                     page.on("request", collect)
-                    pet_panel.get_by_role("textbox", name="问排错鸭").fill(user_text)
-                    pet_panel.get_by_role("textbox", name="问排错鸭").press("Enter")
+                    pet_panel.get_by_role("textbox", name="问鲸鱼娘").fill(user_text)
+                    pet_panel.get_by_role("textbox", name="问鲸鱼娘").press("Enter")
                     expect(pet_panel.get_by_role("status")).to_contain_text("我可以陪你看本次结果")
                     self.assertNotIn(user_text, pet_panel.inner_text())
                     self.assertTrue(all(req.method == "GET" and "/pet/" in req.url for req in requests))
@@ -110,6 +115,7 @@ class Demo(TestCase):
                         page.get_by_role("button", name="正确样例").click()
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
+                        expect(portrait).to_have_css("animation-name", "pet-work")
                         expect(pet_bubble).to_be_visible()
                         held[0].continue_()
                     page.unroute("**/api/runs")
@@ -185,7 +191,8 @@ class Demo(TestCase):
                     self.assertTrue(page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
                     page.emulate_media(reduced_motion="reduce")
                     pet.hover()
-                    expect(pet.locator("img")).to_have_attribute("src", "/pet/duck.png")
+                    expect(portrait).to_have_css("transform", "none")
+                    expect(portrait).to_have_css("animation-name", "none")
                     pet.click()
                     self.assertGreaterEqual(pet_panel.bounding_box()["x"], 0)
                     self.assertLessEqual(pet_panel.bounding_box()["x"] + pet_panel.bounding_box()["width"], 390)
