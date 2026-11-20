@@ -1,10 +1,14 @@
 import concurrent.futures
+from http.client import HTTPConnection
+from http.server import ThreadingHTTPServer
 from io import BytesIO
 import json
 import os
+import sqlite3
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import BoundedSemaphore, Thread
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -98,6 +102,62 @@ class Evaluation(TestCase):
                 run = conn.execute("SELECT * FROM runs WHERE id='test'").fetchone()
                 self.assertEqual((run["state"], run["outcome"]), ("platform_error", "trace_error"))
                 self.assertFalse(json.loads(run["result"])["scored"])
+
+    def test_failed_queue_submission_returns_json_and_releases_slot(self):
+        slots = BoundedSemaphore(1)
+        with TemporaryDirectory() as temp, patch.object(app, "DATABASE", Path(temp) / "test.sqlite3"):
+            app.initialize()
+            body = json.dumps({"lab": "pipe", "source": "int main(void){return 0;}"})
+            headers = {"Content-Type": "application/json"}
+            with ThreadingHTTPServer(("127.0.0.1", 0), app.Handler) as server:
+                thread = Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                connection = HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                try:
+                    with patch.object(app, "SLOTS", slots):
+                        self.assertTrue(slots.acquire(blocking=False))
+                        connection.request("POST", "/api/runs", body, headers)
+                        reply = connection.getresponse()
+                        self.assertEqual(reply.status, 429)
+                        self.assertIn("队列已满", json.load(reply)["error"])
+                        slots.release()
+                        with patch.object(app, "database", side_effect=sqlite3.OperationalError("database unavailable")):
+                            with self.assertLogs(level="ERROR"):
+                                connection.request("POST", "/api/runs", body, headers)
+                                reply = connection.getresponse()
+                        self.assertEqual(reply.status, 503)
+                        self.assertIn("暂时无法提交", json.load(reply)["error"])
+                        with patch.object(app.WORKERS, "submit", side_effect=RuntimeError("executor stopped")):
+                            with self.assertLogs(level="ERROR"):
+                                connection.request("POST", "/api/runs", body, headers)
+                                reply = connection.getresponse()
+                        self.assertEqual(reply.status, 503)
+                        self.assertIn("暂时无法提交", json.load(reply)["error"])
+                        self.assertTrue(slots.acquire(blocking=False))
+                        slots.release()
+                    with app.database() as conn:
+                        rows = conn.execute("SELECT state, outcome FROM runs").fetchall()
+                        self.assertEqual([tuple(row) for row in rows], [("platform_error", "platform_error")])
+                finally:
+                    connection.close()
+                    server.shutdown()
+                    thread.join(timeout=5)
+
+    def test_restart_preserves_finished_history(self):
+        with TemporaryDirectory() as temp, patch.object(app, "DATABASE", Path(temp) / "test.sqlite3"):
+            app.initialize()
+            states = ("queued", "running", "analyzing", "finished")
+            with app.database() as conn:
+                conn.executemany("INSERT INTO runs (id,lab,created,state,outcome,result) VALUES (?,'pipe','0',?,?,?)",
+                                 [(state, state, "passed" if state == "finished" else None,
+                                   '{"passed":2}' if state == "finished" else None) for state in states])
+            app.initialize()
+            with app.database() as conn:
+                rows = {row["id"]: row for row in conn.execute("SELECT * FROM runs")}
+            for state in states[:-1]:
+                self.assertEqual((rows[state]["state"], rows[state]["outcome"]), ("platform_error", "interrupted"))
+            self.assertEqual((rows["finished"]["state"], rows["finished"]["outcome"], rows["finished"]["result"]),
+                             ("finished", "passed", '{"passed":2}'))
 
     def test_diagnosis_against_independent_programs(self):
         programs = [

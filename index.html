@@ -249,8 +249,13 @@ function button(text, click) {
   return b;
 }
 async function api(path, options) {
-  const rs = await fetch(path, options);
-  const data = await rs.json();
+  const previewHint = "连接评测服务失败。请确认 Codespace 正在运行，并从 Ports 重新打开私有预览。";
+  let rs;
+  try { rs = await fetch(path, options); }
+  catch { throw new Error(previewHint); }
+  if (rs.redirected || rs.status === 401 || rs.status === 403) throw new Error(previewHint);
+  const data = await rs.json().catch(() => null);
+  if (!data) throw new Error(previewHint);
   if (!rs.ok) throw new Error(data.error || "请求失败");
   return data;
 }
@@ -324,11 +329,13 @@ function render(initialTracePage = 0) {
   badge.textContent = labels[record?.state] || "待提交";
   badge.className = "status";
   if (!result) {
+    const interrupted = record?.outcome === "interrupted";
     if (record?.state === "platform_error") badge.classList.add("warn");
     const box = el("div", undefined, "empty");
     box.append(el("span", "↳", "empty-mark"),
-      el("h3", record ? (labels[record.state] || "运行中") : "等待一次实验运行"),
-      el("p", record?.state === "platform_error" ? "请在演示终端检查 Docker 服务与镜像，再重新运行。"
+      el("h3", interrupted ? labels.interrupted : record ? (labels[record.state] || "运行中") : "等待一次实验运行"),
+      el("p", interrupted ? "服务重启中断了本次运行，请重新提交实验。"
+      : record?.state === "platform_error" ? "请在演示终端检查 Docker 服务与镜像，再重新运行。"
       : record ? "任务在独立容器执行，结果会自动更新。" : "运行左侧代码，在这里查看用例、轨迹和提示。"));
     contents.append(box);
     return;

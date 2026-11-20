@@ -201,10 +201,16 @@ class Handler(BaseHTTPRequestHandler):
             with database() as conn:
                 conn.execute("INSERT INTO runs (id,lab,created,state) VALUES (?,?,?,'queued')",
                              (run_id, lab, datetime.now(timezone.utc).isoformat()))
-            WORKERS.submit(run_job, run_id, lab, source, data.get("ai") is True)
-        except Exception:
+            try:
+                WORKERS.submit(run_job, run_id, lab, source, data.get("ai") is True)
+            except RuntimeError:
+                with database() as conn:
+                    conn.execute("UPDATE runs SET state='platform_error', outcome='platform_error' WHERE id=?", (run_id,))
+                raise
+        except (RuntimeError, sqlite3.Error):
             SLOTS.release()
-            raise
+            logging.exception("Could not enqueue run %s", run_id)
+            return self.send_data(503, {"error": "评测服务暂时无法提交任务，请稍后重试。"})
         return self.send_data(HTTPStatus.ACCEPTED, {"id": run_id})
 
 

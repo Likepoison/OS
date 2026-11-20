@@ -40,7 +40,13 @@ class Demo(TestCase):
                     page = browser.new_page(viewport={"width": 1440, "height": 960})
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
+                    page.route("**/api/labs", lambda route: route.fulfill(
+                        status=200, content_type="text/html", body="<p>Sign in to continue</p>"))
                     page.goto("http://127.0.0.1:8000")
+                    expect(page.get_by_role("alert")).to_contain_text("从 Ports 重新打开私有预览")
+                    expect(page.get_by_role("button", name="运行实验")).to_be_disabled()
+                    page.unroute("**/api/labs")
+                    page.reload()
                     expect(page).to_have_title("循迹 OS · 操作系统实验工作台")
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
