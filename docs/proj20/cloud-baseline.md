@@ -30,3 +30,5 @@ done
 使用 QEMU TCG 运行两次，串口分别输出 `Hello, world!`，退出码均为 0。挂起场景在 2 秒后返回 124，检查无残留对应 QEMU 进程。在嵌套 SSH 终端重跑 ch1 时，给命令加 `</dev/null`，以便 QEMU 无交互运行。日志在 `/hy-tmp/proj20-evidence/rental-ch1-noninteractive.log`。
 
 从当前客户端直连公开 SSH 端口会在握手前重置。JupyterLab 可登录同一实例，从 Codespace 中转到同一实例的 SSH 握手、主机指纹核对和密码验证也已通过。历史 ch3/ch4 验收日志在 `/hy-tmp/proj20-evidence/codespace-baseline`。
+
+ch3 已在同一台租赁服务器重新运行，官方检查器报告基础 4/4、练习 7/7。日志文件为 `rental-ch3-base.log` 和 `rental-ch3-exercise.log`，均保存在 `/hy-tmp/proj20-evidence`。
