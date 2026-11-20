@@ -82,6 +82,7 @@ pub struct Process {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// 互斥锁列表（**本章新增**，所有线程共享）
     pub mutex_list: Vec<Option<Arc<dyn MutexTrait>>>,
+    pub(super) deadlock: crate::deadlock::Detector,
     /// 条件变量列表（**本章新增**，所有线程共享）
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
 }
@@ -134,6 +135,7 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                deadlock: crate::deadlock::Detector::default(),
             },
             thread,
         ))
@@ -206,6 +208,7 @@ impl Process {
                 semaphore_list: Vec::new(),
                 mutex_list: Vec::new(),
                 condvar_list: Vec::new(),
+                deadlock: crate::deadlock::Detector::default(),
             },
             thread,
         ))

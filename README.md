@@ -11,19 +11,22 @@
 
 - [云端工具和实测记录](docs/proj20/cloud-baseline.md)
 - [零基础第一课：启动内核](docs/proj20/first-boot.md)
+- [ch3 系统调用计数练习](docs/proj20/ch3-syscall-count.md)
 - [ch4 页表权限练习](docs/proj20/ch4-page-permissions.md)
 - [ch5 进程创建与调度练习](docs/proj20/ch5-process-scheduling.md)
 - [ch6 硬链接与 inode 生命周期练习](docs/proj20/ch6-hard-links.md)
+- [ch8 死锁检测练习](docs/proj20/ch8-deadlock-detection.md)
 - [五章实验与验收清单](docs/proj20/acceptance.md)
+- [学习复盘与对照记录表](docs/proj20/learning-review.md)
 
 在云端准备工具后，从仓库根目录运行：
 
 ```bash
-export TG_USER_DIR="$(pwd)/tg-rcore-tutorial-user"
-cd tg-rcore-tutorial-ch3
-bash test.sh base
-bash test.sh exercise
+bash scripts/test_proj20.sh ch3
+bash scripts/test_proj20.sh all
 ```
+
+每章依次运行官方基础和练习测试，日志目录由脚本打印。
 
 原参考教程如下。proj20 固定参考提交为 `d6330a6db1f81c8c1cfba5ec3db9923199398f24`，原许可与署名见 [LICENSE](LICENSE) 和各 crate 的清单。
 

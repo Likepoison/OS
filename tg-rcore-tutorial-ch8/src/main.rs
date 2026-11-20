@@ -47,6 +47,7 @@
 #![cfg_attr(not(target_arch = "riscv64"), allow(dead_code, unused_imports))]
 
 /// 文件系统模块：easy-fs 封装 + 统一 Fd 枚举
+mod deadlock;
 mod fs;
 /// 进程与线程模块：Process（资源容器）和 Thread（执行单元）
 mod process;
@@ -229,45 +230,38 @@ extern "C" fn rust_main() -> ! {
                     let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
                     let syscall_ret = tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args);
 
+                    // 线程创建可能改变存储位置，重新通过当前 TID 定位上下文。
+                    let ctx = unsafe { &mut (*processor).current().unwrap().context.context };
                     // ─── 信号处理 ───
                     let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
                     match current_proc.signal.handle_signals(ctx) {
                         SignalResult::ProcessKilled(exit_code) => unsafe {
-                            (*processor).make_current_exited(exit_code as _)
+                            exit_thread(&mut *processor, exit_code as _)
                         },
                         _ => match syscall_ret {
                             Ret::Done(ret) => match id {
-                                Id::EXIT => unsafe { (*processor).make_current_exited(ret) },
-                                // ─── 本章新增：同步原语阻塞处理 ───
-                                // 当 semaphore_down / mutex_lock / condvar_wait 返回 -1 时，
-                                // 表示资源不可用，将当前线程标记为阻塞态
-                                Id::SEMAPHORE_DOWN | Id::MUTEX_LOCK | Id::CONDVAR_WAIT => {
-                                    let ctx = &mut task.context.context;
-                                    *ctx.a_mut(0) = ret as _;
-                                    if ret == -1 {
-                                        // 阻塞：从就绪队列移除，等待资源释放后唤醒
-                                        unsafe { (*processor).make_current_blocked() };
-                                    } else {
-                                        // 成功获取：正常挂起（时间片轮转）
-                                        unsafe { (*processor).make_current_suspend() };
-                                    }
+                                Id::EXIT => unsafe { exit_thread(&mut *processor, ret) },
+                                Id::SEMAPHORE_DOWN | Id::MUTEX_LOCK | Id::CONDVAR_WAIT
+                                    if ret == SYNC_BLOCKED =>
+                                {
+                                    *ctx.a_mut(0) = 0;
+                                    unsafe { (*processor).make_current_blocked() };
                                 }
                                 _ => {
-                                    let ctx = &mut task.context.context;
                                     *ctx.a_mut(0) = ret as _;
                                     unsafe { (*processor).make_current_suspend() };
                                 }
                             },
                             Ret::Unsupported(_) => {
                                 log::info!("id = {id:?}");
-                                unsafe { (*processor).make_current_exited(-2) };
+                                unsafe { exit_thread(&mut *processor, -2) };
                             }
                         },
                     }
                 }
                 e => {
                     log::error!("unsupported trap: {e:?}");
-                    unsafe { (*processor).make_current_exited(-3) };
+                    unsafe { exit_thread(&mut *processor, -3) };
                 }
             }
         } else {
@@ -277,6 +271,18 @@ extern "C" fn rust_main() -> ! {
     }
 
     tg_sbi::shutdown(false)
+}
+
+// 仅由调度器识别。用户看到的同步操作返回值是唤醒后的成功状态。
+const SYNC_BLOCKED: isize = isize::MIN;
+const DEADLOCK: isize = -0xDEAD;
+
+fn exit_thread(processor: &mut ProcessorInner, code: isize) {
+    let tid = processor.current().expect("running thread").tid.get_usize();
+    if let Some(process) = processor.get_current_proc() {
+        process.deadlock.remove_thread(tid);
+    }
+    processor.make_current_exited(code);
 }
 
 /// panic 处理
@@ -346,6 +352,7 @@ fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
 /// - `SyncMutex` trait（mutex/semaphore/condvar 系统调用）
 /// - 所有操作通过 `ProcessorInner`（PThreadManager）进行双层管理
 mod impls {
+    use crate::{DEADLOCK, SYNC_BLOCKED};
     use crate::{
         build_flags,
         fs::{read_all, Fd, FS},
@@ -363,7 +370,7 @@ mod impls {
         PageManager,
     };
     use tg_signal::SignalNo;
-    use tg_sync::{Condvar, Mutex as MutexTrait, MutexBlocking, Semaphore};
+    use tg_sync::{Condvar, MutexBlocking, Semaphore};
     use tg_syscall::*;
     use tg_task_manage::{ProcId, ThreadId};
     use xmas_elf::ElfFile;
@@ -717,78 +724,102 @@ mod impls {
     /// 实现 Mutex、Semaphore、Condvar 的创建和操作。
     /// 这些同步原语存储在 Process 的列表中，由所有线程共享。
     impl SyncMutex for SyscallContext {
-        /// 创建信号量（初始计数 = res_count）
+        /// 创建信号量（初始计数 = res_count）。
         fn semaphore_create(&self, _caller: Caller, res_count: usize) -> isize {
-            let current_proc = PROCESSOR.get_mut().get_current_proc().unwrap();
-            let id = if let Some(id) = current_proc.semaphore_list.iter().enumerate()
-                .find(|(_, item)| item.is_none()).map(|(id, _)| id)
-            {
-                current_proc.semaphore_list[id] = Some(Arc::new(Semaphore::new(res_count)));
-                id
-            } else {
-                current_proc.semaphore_list.push(Some(Arc::new(Semaphore::new(res_count))));
-                current_proc.semaphore_list.len() - 1
-            };
+            if res_count > isize::MAX as usize {
+                return -1;
+            }
+            let proc = PROCESSOR.get_mut().get_current_proc().unwrap();
+            let id = proc.semaphore_list.len();
+            proc.semaphore_list.push(Some(Arc::new(Semaphore::new(res_count))));
+            proc.deadlock.semaphores.add(id, res_count);
             id as isize
         }
 
-        /// V 操作：释放信号量，唤醒等待线程
-        fn semaphore_up(&self, _caller: Caller, sem_id: usize) -> isize {
-            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
-            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
-            let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
-            if let Some(tid) = sem.up() {
-                unsafe { (*processor).re_enque(tid); }
+        /// V 操作：释放信号量，唤醒等待线程。
+        fn semaphore_up(&self, _caller: Caller, id: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let tid = processor.current().unwrap().tid.get_usize();
+            let proc = processor.get_current_proc().unwrap();
+            let Some(sem) = proc.semaphore_list.get(id).and_then(Option::as_ref) else { return -1 };
+            let state = &mut proc.deadlock.semaphores;
+            if state.available(id) == isize::MAX as usize {
+                return -1;
+            }
+            let next = sem.up();
+            state.release(tid, id, next.map(|thread| thread.get_usize()), false);
+            if let Some(thread) = next {
+                processor.re_enque(thread);
             }
             0
         }
 
-        /// P 操作：获取信号量，不可用则阻塞
-        fn semaphore_down(&self, _caller: Caller, sem_id: usize) -> isize {
-            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
-            let current = unsafe { (*processor).current().unwrap() };
-            let tid = current.tid;
-            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
-            let sem = Arc::clone(current_proc.semaphore_list[sem_id].as_ref().unwrap());
-            if !sem.down(tid) { -1 } else { 0 }
+        /// P 操作：安全时获取一个资源，或等待资源释放。
+        fn semaphore_down(&self, _caller: Caller, id: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let tid = processor.current().unwrap().tid;
+            let proc = processor.get_current_proc().unwrap();
+            let Some(sem) = proc.semaphore_list.get(id).and_then(Option::as_ref) else { return -1 };
+            let state = &mut proc.deadlock.semaphores;
+            if proc.deadlock.enabled && state.would_deadlock(tid.get_usize(), id) {
+                log::debug!("sync kind=semaphore tid={} resource={id} decision=reject-deadlock", tid.get_usize());
+                return DEADLOCK;
+            }
+            let acquired = sem.down(tid);
+            state.request(tid.get_usize(), id, acquired);
+            if proc.deadlock.enabled {
+                log::debug!("sync kind=semaphore tid={} resource={id} decision={}", tid.get_usize(), if acquired { "acquired" } else { "waiting" });
+            }
+            if acquired { 0 } else { SYNC_BLOCKED }
         }
 
-        /// 创建互斥锁（blocking=true 为阻塞锁）
+        /// 创建阻塞互斥锁。
         fn mutex_create(&self, _caller: Caller, blocking: bool) -> isize {
-            let new_mutex: Option<Arc<dyn MutexTrait>> = if blocking {
-                Some(Arc::new(MutexBlocking::new()))
-            } else { None };
-            let current_proc = PROCESSOR.get_mut().get_current_proc().unwrap();
-            if let Some(id) = current_proc.mutex_list.iter().enumerate()
-                .find(|(_, item)| item.is_none()).map(|(id, _)| id)
-            {
-                current_proc.mutex_list[id] = new_mutex;
-                id as isize
-            } else {
-                current_proc.mutex_list.push(new_mutex);
-                current_proc.mutex_list.len() as isize - 1
+            if !blocking {
+                return -1;
             }
+            let proc = PROCESSOR.get_mut().get_current_proc().unwrap();
+            let id = proc.mutex_list.len();
+            proc.mutex_list.push(Some(Arc::new(MutexBlocking::new())));
+            proc.deadlock.mutexes.add(id, 1);
+            id as isize
         }
 
-        /// 解锁，唤醒等待线程
-        fn mutex_unlock(&self, _caller: Caller, mutex_id: usize) -> isize {
-            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
-            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
-            let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
-            if let Some(tid) = mutex.unlock() {
-                unsafe { (*processor).re_enque(tid); }
+        /// 解锁并把锁交给等待队列的队首线程。
+        fn mutex_unlock(&self, _caller: Caller, id: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let tid = processor.current().unwrap().tid.get_usize();
+            let proc = processor.get_current_proc().unwrap();
+            let Some(mutex) = proc.mutex_list.get(id).and_then(Option::as_ref) else { return -1 };
+            let state = &mut proc.deadlock.mutexes;
+            if state.available(id) != 0 {
+                return -1;
+            }
+            let next = mutex.unlock();
+            state.release(tid, id, next.map(|thread| thread.get_usize()), true);
+            if let Some(thread) = next {
+                processor.re_enque(thread);
             }
             0
         }
 
-        /// 加锁，已被占用则阻塞
-        fn mutex_lock(&self, _caller: Caller, mutex_id: usize) -> isize {
-            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
-            let current = unsafe { (*processor).current().unwrap() };
-            let tid = current.tid;
-            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
-            let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
-            if !mutex.lock(tid) { -1 } else { 0 }
+        /// 加锁。检测到死锁风险时，保持原锁和等待队列不变。
+        fn mutex_lock(&self, _caller: Caller, id: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let tid = processor.current().unwrap().tid;
+            let proc = processor.get_current_proc().unwrap();
+            let Some(mutex) = proc.mutex_list.get(id).and_then(Option::as_ref) else { return -1 };
+            let state = &mut proc.deadlock.mutexes;
+            if proc.deadlock.enabled && state.would_deadlock(tid.get_usize(), id) {
+                log::debug!("sync kind=mutex tid={} resource={id} decision=reject-deadlock", tid.get_usize());
+                return DEADLOCK;
+            }
+            let acquired = mutex.lock(tid);
+            state.request(tid.get_usize(), id, acquired);
+            if proc.deadlock.enabled {
+                log::debug!("sync kind=mutex tid={} resource={id} decision={}", tid.get_usize(), if acquired { "acquired" } else { "waiting" });
+            }
+            if acquired { 0 } else { SYNC_BLOCKED }
         }
 
         /// 创建条件变量
@@ -817,25 +848,36 @@ mod impls {
             0
         }
 
-        /// 等待条件变量（释放锁 + 阻塞 + 重新获取锁）
+        /// 按本章条件变量规则释放后重新请求互斥锁，并同步记录锁的交接。
         fn condvar_wait(&self, _caller: Caller, condvar_id: usize, mutex_id: usize) -> isize {
-            let processor: *mut ProcessorInner = PROCESSOR.get_mut() as *mut ProcessorInner;
-            let current = unsafe { (*processor).current().unwrap() };
-            let tid = current.tid;
-            let current_proc = unsafe { (*processor).get_current_proc().unwrap() };
-            let condvar = Arc::clone(current_proc.condvar_list[condvar_id].as_ref().unwrap());
-            let mutex = Arc::clone(current_proc.mutex_list[mutex_id].as_ref().unwrap());
-            let (flag, waking_tid) = condvar.wait_with_mutex(tid, mutex);
-            if let Some(waking_tid) = waking_tid {
-                unsafe { (*processor).re_enque(waking_tid); }
+            let processor = PROCESSOR.get_mut();
+            let tid = processor.current().unwrap().tid;
+            let proc = processor.get_current_proc().unwrap();
+            if proc.condvar_list.get(condvar_id).and_then(Option::as_ref).is_none() {
+                return -1;
             }
-            if !flag { -1 } else { 0 }
+            let Some(mutex) = proc.mutex_list.get(mutex_id).and_then(Option::as_ref) else { return -1 };
+            let state = &mut proc.deadlock.mutexes;
+            if state.available(mutex_id) != 0 {
+                return -1;
+            }
+            let next = mutex.unlock();
+            state.release(tid.get_usize(), mutex_id, next.map(|thread| thread.get_usize()), true);
+            let acquired = mutex.lock(tid);
+            state.request(tid.get_usize(), mutex_id, acquired);
+            if let Some(thread) = next {
+                processor.re_enque(thread);
+            }
+            if acquired { 0 } else { SYNC_BLOCKED }
         }
 
-        /// 死锁检测（TODO 练习题）
+        /// 为当前进程启用或禁用死锁检测。已持有和等待的资源始终被记录。
         fn enable_deadlock_detect(&self, _caller: Caller, is_enable: i32) -> isize {
-            tg_console::log::info!("enable_deadlock_detect: is_enable = {is_enable}, not implemented");
-            -1
+            if !matches!(is_enable, 0 | 1) {
+                return -1;
+            }
+            PROCESSOR.get_mut().get_current_proc().unwrap().deadlock.enabled = is_enable == 1;
+            0
         }
     }
 }

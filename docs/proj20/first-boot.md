@@ -2,11 +2,11 @@
 
 本节只需要理解三件事。Rust 写的是内核代码，Cargo 负责构建，QEMU 在云端模拟一台 RISC-V 计算机。终端看到的最后一行来自模拟机串口。
 
-在已经安装 Rust 和 QEMU 的云端终端运行：
+在已经安装 Rust 和 QEMU 的云端终端，从项目根目录运行：
 
 ```bash
-cd /workspaces/proj20/tg-rcore-tutorial-ch1
-cargo run
+cd tg-rcore-tutorial-ch1
+cargo run </dev/null
 ```
 
 看到 `Hello, world!` 后，终端应返回命令提示符。打开 `src/main.rs`，找出负责输出字符和负责关机的两处调用。
