@@ -1,4 +1,6 @@
-# 循迹 OS（TraceTutor）
+# TraceTutor
+
+参赛全称为《TraceTutor——操作系统实验评测与智能诊断平台》。
 
 面向 proj56 的操作系统实验工作台。提交 C 源码后，Python 服务安排独立 Docker 容器编译运行，使用 strace 跟踪进程树，并按固定用例评分。页面提供调用证据、三层提示和实验记录。
 
@@ -52,4 +54,4 @@ python3 app.py
 - [Docker 资源约束](https://docs.docker.com/engine/containers/resource_constraints/)用于配置和实测 CPU、内存、交换空间及进程数上限。
 - [strace 手册](https://man7.org/linux/man-pages/man1/strace.1.html)与 [ptrace 手册](https://man7.org/linux/man-pages/man2/ptrace.2.html)用于跟踪进程树、解码描述符并判定采集和权限边界。
 - 题目提供的 [Go](https://go.dev/doc/)、[PostgreSQL](https://www.postgresql.org/docs/current/installation.html)、[MinIO](https://docs.min.io/aistor/installation/linux/install/) 是参考选项。按需演示使用 Python 和 SQLite。
-- 桌宠的气泡和按需语音交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)，独立运行和状态动作参考 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)。循迹 OS 直接在实验页运行这些交互。头像原样使用 [Coopanion v0.1.10 内置 DeepSeek Chan 预览素材](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)，随附[当时的 MIT 许可](pet/LICENSE-Coopanion.txt)。按[同版本素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。
+- 桌宠的气泡和按需语音交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)，独立运行和状态动作参考 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)。TraceTutor 直接在实验页运行这些交互。头像原样使用 [Coopanion v0.1.10 内置 DeepSeek Chan 预览素材](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)，随附[当时的 MIT 许可](pet/LICENSE-Coopanion.txt)。按[同版本素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。
