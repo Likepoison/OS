@@ -101,7 +101,6 @@ extern "C" fn rust_main() -> ! {
     tg_syscall::init_process(&SyscallContext);
     tg_syscall::init_scheduling(&SyscallContext);
     tg_syscall::init_clock(&SyscallContext);
-    tg_syscall::init_trace(&SyscallContext);
 
     // 第四步：初始化任务控制块数组，加载所有用户程序
     let mut tcbs = [TaskControlBlock::ZERO; APP_CAPACITY];
@@ -291,27 +290,6 @@ mod impls {
                 }
                 _ => -1,
             }
-        }
-    }
-
-    /// Trace 系统调用实现（练习题需要完成的部分）
-    ///
-    /// 当前为占位实现，返回 -1 表示未实现。
-    /// 学生需要在练习中实现 trace 功能，支持：
-    /// - 读取用户内存（trace_request=0）
-    /// - 写入用户内存（trace_request=1）
-    /// - 查询系统调用计数（trace_request=2）
-    impl Trace for SyscallContext {
-        #[inline]
-        fn trace(
-            &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
-        ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
         }
     }
 }

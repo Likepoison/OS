@@ -1,5 +1,30 @@
 # TanGram-rCore-Tutorial
 
+## 本仓库的两个参赛项目
+
+| 题号 | 项目 | 分支 |
+|---|---|---|
+| proj20 | AI 合作的操作系统课教学实验环境。面向 Rust 和操作系统零基础学习者，使用 Rust、RISC-V64、QEMU 和内核串口证据完成实验。 | [proj20](https://github.com/Likepoison/OS/tree/proj20) |
+| proj56 | TraceTutor——操作系统实验评测与智能诊断平台。实验运行、评测、诊断与助教交互。 | [proj56](https://github.com/Likepoison/OS/tree/proj56) |
+
+### proj20 从这里开始
+
+- [云端工具和实测记录](docs/proj20/cloud-baseline.md)
+- [零基础第一课：启动内核](docs/proj20/first-boot.md)
+- [五章实验与验收清单](docs/proj20/acceptance.md)
+
+在云端准备工具后，从仓库根目录运行：
+
+```bash
+export TG_USER_DIR="$(pwd)/tg-rcore-tutorial-user"
+cd tg-rcore-tutorial-ch3
+bash test.sh base
+bash test.sh exercise
+```
+
+原参考教程如下。proj20 固定参考提交为 `d6330a6db1f81c8c1cfba5ec3db9923199398f24`，原许可与署名见 [LICENSE](LICENSE) 和各 crate 的清单。
+
+
 [![Crates.io](https://img.shields.io/crates/v/tg-rcore-tutorial.svg)](https://crates.io/crates/tg-rcore-tutorial) [![Docs.rs](https://docs.rs/tg-rcore-tutorial/badge.svg)](https://docs.rs/tg-rcore-tutorial) [![License](https://img.shields.io/crates/l/tg-rcore-tutorial.svg)](LICENSE)
 
 ## 0. 简介

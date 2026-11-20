@@ -18,6 +18,16 @@
 use tg_kernel_context::LocalContext;
 use tg_syscall::{Caller, SyscallId};
 
+// ch3 的用户镜像加载器为每个任务预留 2 MiB，镜像后的空间用于零初始化数据。
+const APP_SLOT_SIZE: usize = 0x20_0000;
+const TRACKED_SYSCALLS: [SyscallId; 5] = [
+    SyscallId::WRITE,
+    SyscallId::EXIT,
+    SyscallId::CLOCK_GETTIME,
+    SyscallId::SCHED_YIELD,
+    SyscallId::TRACE,
+];
+
 /// 任务控制块（Task Control Block, TCB）
 ///
 /// 每个用户程序对应一个 TCB，包含：
@@ -27,6 +37,8 @@ use tg_syscall::{Caller, SyscallId};
 pub struct TaskControlBlock {
     /// 用户态上下文：保存 Trap 时的所有寄存器状态
     ctx: LocalContext,
+    app_base: usize,
+    syscall_counts: [isize; TRACKED_SYSCALLS.len()],
     /// 任务完成标志：true 表示已退出或被杀死
     pub finish: bool,
     /// 用户栈：8 KiB（1024 个 usize = 1024 × 8 = 8192 字节）
@@ -53,6 +65,8 @@ impl TaskControlBlock {
     /// 零值常量：用于数组初始化
     pub const ZERO: Self = Self {
         ctx: LocalContext::empty(),
+        app_base: 0,
+        syscall_counts: [0; TRACKED_SYSCALLS.len()],
         finish: false,
         stack: [0; 1024],
     };
@@ -66,6 +80,8 @@ impl TaskControlBlock {
         self.stack.fill(0);
         self.finish = false;
         self.ctx = LocalContext::user(entry);
+        self.app_base = entry;
+        self.syscall_counts.fill(0);
         // 栈从高地址向低地址增长，所以 sp 指向栈顶（数组末尾之后的地址）
         *self.ctx.sp_mut() = self.stack.as_ptr() as usize + core::mem::size_of_val(&self.stack);
     }
@@ -79,6 +95,38 @@ impl TaskControlBlock {
         unsafe { self.ctx.execute() };
     }
 
+    fn trace(&mut self, request: usize, id: usize, data: usize) -> isize {
+        match request {
+            2 => TRACKED_SYSCALLS
+                .iter()
+                .position(|syscall| syscall.0 == id)
+                .map_or(0, |index| self.syscall_counts[index]),
+            0 | 1 => {
+                let stack = self.stack.as_mut_ptr().cast::<u8>();
+                let stack_offset = id.wrapping_sub(stack.addr());
+                let ptr = if stack_offset < core::mem::size_of_val(&self.stack) {
+                    // SAFETY: stack_offset is within the byte range of self.stack.
+                    unsafe { stack.add(stack_offset) }
+                } else if id.wrapping_sub(self.app_base) < APP_SLOT_SIZE {
+                    // The loader mapped this task's application slot before TaskControlBlock::init.
+                    core::ptr::with_exposed_provenance_mut::<u8>(id)
+                } else {
+                    return -1;
+                };
+                // SAFETY: ptr points to one byte in this task's stack or application slot.
+                unsafe {
+                    if request == 0 {
+                        ptr.read() as isize
+                    } else {
+                        ptr.write(data as u8);
+                        0
+                    }
+                }
+            }
+            _ => -1,
+        }
+    }
+
     /// 处理系统调用，返回调度事件
     ///
     /// 从用户上下文中提取系统调用 ID（a7 寄存器）和参数（a0-a5 寄存器），
@@ -88,7 +136,10 @@ impl TaskControlBlock {
         use SchedulingEvent as Event;
 
         // a7 寄存器存放 syscall ID
-        let id = self.ctx.a(7).into();
+        let id = SyscallId::from(self.ctx.a(7));
+        if let Some(index) = TRACKED_SYSCALLS.iter().position(|syscall| syscall.0 == id.0) {
+            self.syscall_counts[index] = self.syscall_counts[index].saturating_add(1);
+        }
         // a0-a5 寄存器存放系统调用参数
         let args = [
             self.ctx.a(0),
@@ -98,7 +149,11 @@ impl TaskControlBlock {
             self.ctx.a(4),
             self.ctx.a(5),
         ];
-        match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
+        let result = match id {
+            Id::TRACE => Ret::Done(self.trace(args[0], args[1], args[2])),
+            _ => tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args),
+        };
+        match result {
             Ret::Done(ret) => match id {
                 // exit 系统调用：返回退出事件
                 Id::EXIT => Event::Exit(self.ctx.a(0)),
