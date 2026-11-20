@@ -26,6 +26,102 @@ const petClues = {
   memory_limit: "这次触发了内存限额。对照用例输入和程序请求的字节数，从分配和实际访问的区别想起。",
   signal_exit: "轨迹确认了使主进程退出的信号。先看退出事件，再向前找最后一次正常调用。"
 };
+const callClues = {
+  pipe: "pipe 建立一对读端、写端，父子进程可能各自持有这两个描述符。",
+  read: "read 试着读取数据。返回大于 0 表示读到了数据，返回 0 通常表示文件或管道到了末尾。",
+  write: "write 返回实际写入的字节数。它可能少于请求写入的字节数。",
+  close: "close 关闭当前进程里的这个描述符。其他进程持有的同一端仍可能有效。",
+  futex: "futex 用于线程间等待或唤醒。要先区分它的操作类型，再判断哪个线程可能改变等待条件。",
+  mmap: "mmap 建立虚拟地址映射。调用成功时，仍需结合后续访问与解除映射查看生命周期。",
+  munmap: "munmap 解除指定地址范围的映射。检查它的起始地址和长度是否与分配对应。",
+  lseek: "lseek 调整打开文件的偏移量。回卷后才会从前面的字节读起。",
+  openat: "openat 尝试打开文件。成功时返回新的文件描述符，可跟踪后续读写。",
+  clone: "clone 创建一个任务。参数可以帮助区分是共享地址空间的线程，还是子进程。",
+  wait4: "wait4 等待子进程状态发生变化，并可读取其退出状态。"
+};
+const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
+
+function setupPetVoice(input, message, resize) {
+  const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let listener, timeout;
+  function note(text = "") {
+    status.hidden = !text;
+    status.textContent = text;
+    resize();
+  }
+  function clearListener() {
+    clearTimeout(timeout);
+    listener = undefined;
+    mic.setAttribute("aria-pressed", "false");
+    mic.textContent = "语音输入";
+  }
+  function stopListening() {
+    if (!listener) return false;
+    const active = listener;
+    clearListener();
+    active.abort();
+    return true;
+  }
+  mic.disabled = !Recognition;
+  read.disabled = !window.speechSynthesis || !window.SpeechSynthesisUtterance;
+  mic.title = Recognition ? "浏览器识别普通话，转写后可确认发送" : "当前浏览器不支持语音输入";
+  if (!Recognition) note("当前浏览器可使用文字输入。");
+  mic.addEventListener("click", () => {
+    if (stopListening()) return note("已取消语音输入。");
+    const active = new Recognition();
+    listener = active;
+    active.lang = "zh-CN";
+    active.interimResults = false;
+    active.continuous = false;
+    active.onresult = event => {
+      if (listener !== active) return;
+      const text = event.results[event.resultIndex]?.[0]?.transcript.trim();
+      clearListener();
+      if (!text) return note("没有听清，可以再说一次或直接输入文字。");
+      input.value = text.slice(0, input.maxLength);
+      note("已转写。确认文字后发送。");
+      input.focus();
+    };
+    active.onerror = event => {
+      if (listener !== active) return;
+      clearListener();
+      note(event.error === "not-allowed" || event.error === "service-not-allowed"
+        ? "麦克风或识别服务不可用，可以继续打字。"
+        : "语音识别暂未成功，可以重试或打字。");
+    };
+    active.onend = () => {
+      if (listener !== active) return;
+      clearListener();
+      note("没有收到转写，可以重试或打字。");
+    };
+    try {
+      active.start();
+      mic.setAttribute("aria-pressed", "true");
+      mic.textContent = "停止聆听";
+      note("浏览器正在识别普通话。转写后请确认发送。");
+      timeout = setTimeout(() => {
+        if (stopListening()) note("本轮语音输入已结束，可以重试或打字。");
+      }, 12000);
+    } catch {
+      clearListener();
+      note("无法启动浏览器语音识别，可以继续打字。");
+    }
+  });
+  read.addEventListener("click", () => {
+    const reply = new SpeechSynthesisUtterance(message.textContent);
+    reply.lang = "zh-CN";
+    speechSynthesis.cancel();
+    speechSynthesis.speak(reply);
+  });
+  function stop() {
+    if (stopListening()) note();
+    if (!read.disabled) speechSynthesis.cancel();
+  }
+  window.addEventListener("pagehide", stop);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
+  return stop;
+}
 
 function makeCompanion(activeLab, openResult) {
   const avatar = byId("pet-launch"), panel = byId("pet-panel");
@@ -34,7 +130,10 @@ function makeCompanion(activeLab, openResult) {
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const input = byId("pet-input");
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
+  let view = "grade", visibleEvents, selectedEvent;
+  const learning = new Map(), counted = new Set();
   let celebration, bubbleTimer;
+  const stopVoice = setupPetVoice(input, message, () => place(panel));
 
   function updateAppearance() {
     avatar.dataset.mood = mood;
@@ -104,7 +203,10 @@ function makeCompanion(activeLab, openResult) {
       hideBubble();
       place(panel);
       if (focus) byId("pet-title").focus();
-    } else if (focus) avatar.focus();
+    } else {
+      stopVoice();
+      if (focus) avatar.focus();
+    }
   }
 
   function reveal(kind) {
@@ -113,13 +215,19 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function showQuiz() {
-    const lesson = petLessons[activeLab()];
+    const lab = activeLab();
+    const lesson = petLessons[lab];
     if (!lesson) return speak("选择一个实验，我就能给你出一道相关的小题。");
+    const status = study(lab);
     const [question, options, correct, explanation] = lesson;
-    speak("来做一道概念题。答错了也可以再试。");
+    speak(status.answers > status.correct
+      ? "再用一道概念题确认刚才的知识点。可以回看系统调用后再答。"
+      : "来做一道概念题。答错了也可以再试。");
     byId("pet-question").textContent = question;
     choices.replaceChildren(...options.map((option, i) => button(option, () => {
       const isCorrect = i === correct;
+      status.answers++;
+      if (isCorrect) status.correct++;
       speak(isCorrect ? "答对啦！" + explanation : "再想一步。先分清轨迹里看到的事实和推断，再选一次。");
       if (isCorrect) {
         quiz.hidden = true;
@@ -133,7 +241,75 @@ function makeCompanion(activeLab, openResult) {
     place(panel);
   }
 
+  function study(lab) {
+    if (!learning.has(lab)) learning.set(lab, {runs: 0, answers: 0, correct: 0});
+    return learning.get(lab);
+  }
+
+  function recordRun(run) {
+    if (!run?.lab || !run.score || counted.has(run.id)) return;
+    counted.add(run.id);
+    const status = study(run.lab);
+    status.runs++;
+    status.score = run.score;
+  }
+
+  function reportProgress() {
+    const status = study(activeLab());
+    const recent = status.score ? "最近一次通过 " + status.score.join("/") + " 个用例。" : "";
+    const next = status.score && status.score[0] < status.score[1]
+      ? "下一步可以查看失败用例和对应轨迹。"
+      : status.answers > status.correct ? "下一步可回看刚才的概念，再试一次。"
+      : "可以做一道概念题来检验理解。";
+    speak("当前实验评测 " + status.runs + " 次。" + recent +
+      "概念题答对 " + status.correct + "/" + status.answers + " 次。" + next);
+  }
+
+  function observe(next, total) {
+    const changed = view !== next;
+    view = next;
+    visibleEvents = total;
+    selectedEvent = undefined;
+    if (changed && (view === "history" || ((view === "trace" || view === "hints") && activeRun?.hasResult))) {
+      explainView();
+      announce();
+    }
+  }
+
+  function explain(event) {
+    selectedEvent = event;
+    if (avatar.hidden) {
+      avatar.hidden = false;
+      byId("pet-restore").hidden = true;
+    }
+    setOpen(true);
+    explainSelected();
+  }
+
+  function explainSelected() {
+    const {id, call, kind, errno} = selectedEvent;
+    const clue = callClues[callAliases[call] || call];
+    const observation = errno ? "返回 " + errno + "。"
+      : kind === "pending" ? "采集结束时尚未观察到返回。"
+      : kind === "partial" ? "这条记录只有调用的一部分。"
+      : "";
+    speak("事件 #" + id + " 的 " + call + "。" + observation +
+      (clue || "可以沿着对应的原始日志行，检查参数和返回值。"));
+  }
+
+  function explainView() {
+    if (selectedEvent) return explainSelected();
+    if (view === "history") return speak("当前是实验记录。选择同一个实验的两次结果，可以对照调整前后的判定和证据。");
+    if (view === "trace") return speak("当前是系统调用轨迹" +
+      (visibleEvents === undefined ? "。" : "，当前筛选匹配 " + visibleEvents + " 条记录。") +
+      "用「问助教」查看一条调用的含义，再结合原始日志判断。");
+    if (view === "hints") return speak("当前是分层提示。先读观察方向，再打开相关原理或证据定位。");
+    speak("当前是测试判定。先对照用例输入和输出，再看与失败相关的调用。");
+  }
+
   function respond(text) {
+    if (/进度|学得|学到哪|答了几|小结|掌握/.test(text)) return reportProgress();
+    if (/正在看|在看什么|当前页面|这页|这条|这个调用|刚才那条/.test(text)) return explainView();
     if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
     if (/deepseek|\bai\b|提示|线索/i.test(text)) {
       if (activeRun?.ai) return speak("这次有 DeepSeek 的分层提问。可以打开提示，沿着引用回看系统调用。");
@@ -145,8 +321,10 @@ function makeCompanion(activeLab, openResult) {
         ? "目前能确认的线索有限。先看末尾轨迹，找找最后哪条调用返回了。"
         : "先打开运行分析，看看用例结果和系统调用能否互相印证。"));
     }
-    if (/管道|eof|描述符|死锁|内存|线程|调度|futex|mmap/i.test(text)) {
-      return speak("我们可以从当前实验的一道概念题开始，再用轨迹验证你的判断。");
+    const mentioned = text.toLowerCase().match(/\b(pipe2?|readv?|writev?|close|futex|mmap|munmap|lseek|openat2?|clone3?|wait4|waitid)\b/);
+    if (mentioned) return speak(callClues[callAliases[mentioned[0]] || mentioned[0]]);
+    if (/管道|eof|描述符|死锁|内存|线程|调度/i.test(text)) {
+      return speak("我们可以从当前实验的一道概念题开始。也可打开轨迹，点一条调用的「问助教」。");
     }
     if (/你好|谢谢|嗨|hello|hi\b/i.test(text)) return speak("你好呀！我在这儿。你可以问我怎么看线索，或者做一道小测。");
     speak("我可以陪你看本次结果、找轨迹、读提示，或者做一道操作系统小测。想先试哪个？");
@@ -157,7 +335,7 @@ function makeCompanion(activeLab, openResult) {
     if (key === lastUpdate) return;
     lastUpdate = key;
     activeRun = run;
-    const contextButtons = [button("来道小测", showQuiz)];
+    const contextButtons = [button("来道小测", showQuiz), button("学习进度", reportProgress)];
     contextButtons[0].id = "pet-quiz-start";
     if (run?.hasResult) {
       if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
@@ -265,7 +443,7 @@ function makeCompanion(activeLab, openResult) {
     if (text) respond(text);
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
-  return {update};
+  return {update, observe, explain, recordRun};
 }
 
 companion = makeCompanion(() => select.value, openPetResult);

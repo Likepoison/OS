@@ -14,7 +14,9 @@ python app.py
 
 「鲸鱼娘助教」随网页出现，在打开页面、评测进行中、评测通过或需要排查时自动显示气泡。点击桌宠可问排查方向、打开本次分层提示，或做一道与当前实验相关的概念题。将鼠标划过可看到动作，拖动或用方向键可以调整位置，按 Esc 收起面板。选择「隐藏桌宠」可关闭头像和气泡，从页头「显示助教」恢复。关闭网页即结束互动。
 
-桌宠只接收实验与运行摘要，话术来自本地教学内容，问题不会送到模型，概念题不影响实验得分。已有 DeepSeek 反馈时，桌宠会提供对应入口。
+切换到系统调用、分层提示或实验记录时，助教会根据当前页面给出导览。点击某条轨迹的「问助教」，可追问该调用与已观察到的返回状态。「学习进度」按实验汇总本页会话内的评测和小测，便于判断下一步复习内容。
+
+可以打字，或在支持语音输入的浏览器上点击「语音输入」，确认转写文字后发送。朗读和语音输入由浏览器提供，语音识别可能使用浏览器服务。桌宠只接收当前页的结构化实验信息，话术和问答处理位于页面内。已有 DeepSeek 分层反馈时，桌宠会提供相应入口。
 
 如果网页 IDE 连接缓慢，在 [Your Codespaces](https://github.com/codespaces) 选择同一个 Codespace，使用 **Open in → Visual Studio Code**。桌面 VS Code 需安装 GitHub Codespaces 扩展并登录，终端依然运行在远端。
 
@@ -50,4 +52,4 @@ python3 app.py
 - [Docker 资源约束](https://docs.docker.com/engine/containers/resource_constraints/)用于配置和实测 CPU、内存、交换空间及进程数上限。
 - [strace 手册](https://man7.org/linux/man-pages/man1/strace.1.html)与 [ptrace 手册](https://man7.org/linux/man-pages/man2/ptrace.2.html)用于跟踪进程树、解码描述符并判定采集和权限边界。
 - 题目提供的 [Go](https://go.dev/doc/)、[PostgreSQL](https://www.postgresql.org/docs/current/installation.html)、[MinIO](https://docs.min.io/aistor/installation/linux/install/) 是参考选项。按需演示使用 Python 和 SQLite。
-- 桌宠交互主要参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)。头像原样使用其 [v0.1.10 内置 DeepSeek Chan 预览素材](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)，随附[当时的 MIT 许可](pet/LICENSE-Coopanion.txt)。按[同版本素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。
+- 桌宠的气泡和按需语音交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)，独立运行和状态动作参考 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)。循迹 OS 直接在实验页运行这些交互。头像原样使用 [Coopanion v0.1.10 内置 DeepSeek Chan 预览素材](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)，随附[当时的 MIT 许可](pet/LICENSE-Coopanion.txt)。按[同版本素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。

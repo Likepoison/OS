@@ -83,6 +83,8 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .event { border-bottom: 1px solid var(--line); padding: 8px 7px; min-width: 0; }
 .event.evidence { outline: 1px solid var(--line); outline-offset: -1px; background: var(--soft); }
 .event small { color: var(--muted); font: 12px var(--mono); overflow-wrap: anywhere; }
+.event-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
+.event-heading button { padding: 3px 7px; font-size: 12px; }
 .event pre { margin-bottom: 0; }
 .pager { margin-top: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .hint { padding: 13px 0; border-bottom: 1px solid var(--line); }
@@ -136,6 +138,8 @@ td code { font: 12px var(--mono); }
 .pet-panel .tool-row { margin-bottom: 10px; }
 .pet-form input { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px; }
 .pet-form button { flex: none; }
+.pet-voice { margin: 8px 0 0; }
+.pet-voice .tool-row { margin-bottom: 3px; }
 .pet-quiz { margin: 10px 0; padding: 0; border: 0; min-width: 0; }
 .pet-quiz legend { font-weight: 650; font-size: 14px; margin-bottom: 6px; padding: 0; }
 .pet-quiz button { display: flex; width: 100%; margin-bottom: 5px; text-align: left; }
@@ -218,6 +222,11 @@ td code { font: 12px var(--mono); }
   <fieldset class="pet-quiz" id="pet-quiz" hidden><legend id="pet-question"></legend><div id="pet-choices"></div></fieldset>
   <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问鲸鱼娘" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
+  <div class="pet-voice">
+    <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false">语音输入</button>
+      <button id="pet-read" class="button" type="button">朗读回复</button></div>
+    <p id="pet-voice-status" class="muted" role="status" hidden></p>
+  </div>
   <p class="muted pet-help">可拖动桌宠。键盘聚焦后用方向键移动，Esc 收起。</p>
   <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
     <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
@@ -282,6 +291,7 @@ function navigate(history) {
   byId("history").hidden = !history;
   byId("work-tab").setAttribute("aria-pressed", String(!history));
   byId("history-tab").setAttribute("aria-pressed", String(history));
+  companion?.observe(history ? "history" : tab);
   if (history) refreshHistory();
 }
 function showTab(next, initialTracePage = 0) {
@@ -304,9 +314,11 @@ function petSnapshot(run) {
   const result = run.result;
   return {
     id: run.id,
+    lab: run.lab,
     state: run.state,
     hasResult: Boolean(result),
     passed: Boolean(result && result.scored !== false && result.passed === result.total),
+    score: result?.scored !== false && result ? [result.passed, result.total] : null,
     code: result?.diagnosis.code,
     confidence: result?.diagnosis.confidence,
     ai: result?.feedback.source === "ai",
@@ -322,6 +334,7 @@ function openPetResult(id, kind) {
 }
 function render(initialTracePage = 0) {
   companion?.update(petSnapshot(record));
+  companion?.observe(byId("workspace").hidden ? "history" : tab);
   const version = ++viewVersion;
   contents.replaceChildren();
   const result = record?.result;
@@ -425,13 +438,23 @@ function traceView(result, version, initialPage) {
       if (seq !== requests || version !== viewVersion) return;
       events.replaceChildren();
       pager.replaceChildren();
+      if (!byId("workspace").hidden) companion?.observe("trace", data.total);
       if (!data.events.length) events.append(el("p", "没有匹配的轨迹事件。", "muted"));
       for (const ev of data.events) {
         const linked = caseIndex === result.evidence_case && result.diagnosis.evidence.includes(ev.id);
         const row = el("article", undefined, linked ? "event evidence" : "event");
+        const heading = el("div", undefined, "event-heading");
         const sourceLines = ev.lines.join("、");
-        row.append(el("small", "#" + ev.id + " · PID/TID " + ev.pid + " · 原日志行 " + sourceLines +
-          (ev.duration_us != null ? " · " + ev.duration_us + " µs" : "")), el("pre", ev.text));
+        heading.append(el("small", "#" + ev.id + " · PID/TID " + ev.pid + " · 原日志行 " + sourceLines +
+          (ev.duration_us != null ? " · " + ev.duration_us + " µs" : "")));
+        if (ev.call) {
+          const ask = button("问助教", () => companion?.explain({
+            id: ev.id, call: ev.call, kind: ev.kind, errno: ev.errno
+          }));
+          ask.setAttribute("aria-label", "问助教：事件 " + ev.id);
+          heading.append(ask);
+        }
+        row.append(heading, el("pre", ev.text));
         events.append(row);
       }
       const previous = button("上一页", () => load(data.page - 1));
@@ -445,13 +468,14 @@ function traceView(result, version, initialPage) {
   search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => load(0), 180); });
   load(initialPage);
 }
-async function track(id) {
+async function track(id, submission = false) {
   polling = true;
   byId("run").disabled = true;
   try {
     for (let attempt = 0; attempt < 160; attempt++) {
       record = await api("/api/runs/" + id);
       if (record.result || record.state === "platform_error") {
+        if (submission) companion?.recordRun(petSnapshot(record));
         caseIndex = record.result?.evidence_case || 0;
         showTab("grade");
         return;
@@ -565,7 +589,7 @@ byId("run").addEventListener("click", async () => {
     const queued = await api("/api/runs", {method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({lab:select.value, source:source.value, ai:byId("ai").checked})});
     onlyEvidence = false;
-    await track(queued.id);
+    await track(queued.id, true);
   } catch (err) {
     notice(err.message); polling = false; byId("run").disabled = false;
     companion?.update(petSnapshot(record));

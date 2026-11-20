@@ -38,6 +38,13 @@ class Demo(TestCase):
                 with sync_playwright() as runtime:
                     browser = runtime.chromium.launch()
                     page = browser.new_page(viewport={"width": 1440, "height": 960})
+                    page.add_init_script("""
+                        window.SpeechRecognition = class {
+                          start() { window.currentDictation = this; }
+                          stop() {}
+                          abort() { this.cancelled = true; }
+                        };
+                    """)
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
                     page.route("**/api/labs", lambda route: route.fulfill(
@@ -52,6 +59,7 @@ class Demo(TestCase):
                     expect(run).to_be_enabled()
                     pet = page.get_by_role("button", name="鲸鱼娘助教")
                     pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
+                    pet_reply = pet_panel.locator("#pet-reply")
                     portrait = pet.locator("img")
                     expect(portrait).to_have_attribute("src", "/pet/whale-girl.png")
                     self.assertEqual(portrait.evaluate("(img) => img.naturalWidth"), 144)
@@ -75,9 +83,23 @@ class Demo(TestCase):
                     expect(pet_panel).to_be_visible()
                     pet_panel.get_by_role("button", name="来道小测").click()
                     pet_panel.get_by_role("button", name="任意一个写端被关闭后").click()
-                    expect(pet_panel.get_by_role("status")).to_contain_text("再想一步")
+                    expect(pet_reply).to_contain_text("再想一步")
                     pet_panel.get_by_role("button", name="最后一个写端被关闭后").click()
-                    expect(pet_panel.get_by_role("status")).to_contain_text("答对啦")
+                    expect(pet_reply).to_contain_text("答对啦")
+                    voice = pet_panel.get_by_role("button", name="语音输入")
+                    prompt = pet_panel.get_by_role("textbox", name="问鲸鱼娘")
+                    voice.click()
+                    expect(pet_panel.get_by_role("button", name="停止聆听")).to_be_visible()
+                    page.evaluate("""window.currentDictation.onresult({
+                        resultIndex: 0, results: [[{transcript: "我的学习进度怎样"}]]
+                    })""")
+                    expect(prompt).to_have_value("我的学习进度怎样")
+                    expect(pet_reply).to_contain_text("答对啦")
+                    prompt.press("Enter")
+                    expect(pet_reply).to_contain_text("概念题答对 1/2 次")
+                    voice.click()
+                    page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
+                    expect(pet_panel.locator("#pet-voice-status")).to_contain_text("可以继续打字")
                     user_text = "<b>无关内容</b>"
                     requests = []
                     def collect(request):
@@ -86,13 +108,15 @@ class Demo(TestCase):
                     page.on("request", collect)
                     pet_panel.get_by_role("textbox", name="问鲸鱼娘").fill(user_text)
                     pet_panel.get_by_role("textbox", name="问鲸鱼娘").press("Enter")
-                    expect(pet_panel.get_by_role("status")).to_contain_text("我可以陪你看本次结果")
+                    expect(pet_reply).to_contain_text("我可以陪你看本次结果")
                     self.assertNotIn(user_text, pet_panel.inner_text())
                     self.assertTrue(all(req.method == "GET" and "/pet/" in req.url for req in requests))
                     page.remove_listener("request", collect)
                     pet_panel.get_by_role("button", name="回到角落").click()
                     self.assertEqual(pet.bounding_box()["x"], original["x"])
+                    voice.click()
                     pet_panel.get_by_role("button", name="隐藏桌宠").click()
+                    self.assertTrue(page.evaluate("window.currentDictation.cancelled"))
                     expect(pet).to_be_hidden()
                     expect(pet_bubble).to_be_hidden()
                     expect(pet_panel).to_be_hidden()
@@ -130,7 +154,7 @@ class Demo(TestCase):
                     expect(pet).to_have_attribute("data-mood", "review")
                     expect(pet_bubble).to_contain_text("有运行线索")
                     pet.click()
-                    expect(pet_panel.get_by_role("status")).to_contain_text("有运行线索")
+                    expect(pet_reply).to_contain_text("有运行线索")
                     if out:
                         page.screenshot(path=f"{out}/companion.png", full_page=True)
                     pet_panel.get_by_role("button", name="打开 DeepSeek 提示" if live else "打开分层提示").click()
@@ -139,6 +163,15 @@ class Demo(TestCase):
                     page.get_by_role("button", name="查看关联事件").click()
                     expect(page.locator(".event.evidence").first).to_be_visible()
                     expect(page.get_by_role("link", name="原始日志")).to_be_visible()
+                    expect(pet_bubble).to_contain_text("系统调用轨迹")
+                    ask = page.locator(".event.evidence").get_by_role("button", name=re.compile("问助教")).first
+                    event_number = ask.get_attribute("aria-label").split()[-1]
+                    ask.click()
+                    expect(pet_reply).to_contain_text("事件 #" + event_number)
+                    prompt.fill("这条调用是什么意思")
+                    prompt.press("Enter")
+                    expect(pet_reply).to_contain_text("事件 #" + event_number)
+                    pet_panel.get_by_role("button", name="收起").click()
                     if out:
                         page.screenshot(path=f"{out}/evidence.png", full_page=True)
                     page.get_by_role("button", name="分层提示").click()
@@ -162,6 +195,12 @@ class Demo(TestCase):
                     expect(page.get_by_text("2 / 2 通过", exact=True)).to_be_visible(timeout=30000)
                     expect(pet).to_have_attribute("data-mood", "success")
                     expect(pet_bubble).to_contain_text("全部用例通过")
+                    pet.click()
+                    pet_panel.get_by_role("button", name="学习进度").click()
+                    expect(pet_reply).to_contain_text("评测 2 次")
+                    expect(pet_reply).to_contain_text("最近一次通过 2/2")
+                    expect(pet_reply).to_contain_text("概念题答对 1/2 次")
+                    pet_panel.get_by_role("button", name="收起").click()
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
                     page.get_by_role("button", name="对比最近两次").click()
