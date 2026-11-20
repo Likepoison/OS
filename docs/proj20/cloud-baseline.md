@@ -20,3 +20,13 @@ done
 ```
 
 原始文件在 `/workspaces/proj20-evidence`，包括 `ch1-build.log`、`ch1-run-1.log`、`ch1-run-2.log` 和 `qemu-timeout.log`。ch1 结果是环境证据。五个练习分别以各章运行结果验收。
+
+## 租赁服务器复验
+
+复验日志写入时间 2026-11-20 23:17:27 +0800。工作区为 `/hy-tmp/proj20`，迁移提交为 `bfa0ae37bed8cbe42b1a987154d8fe0ac82f0f54`，Git 对象检查通过。
+
+实例配额为 9 vCPU、约 30 GiB 内存，`/hy-tmp` 初次检查约有 50 GiB 可用。Rust 1.100.0 的裸机目标、`rust-src` 和 `llvm-tools-preview` 已安装。Ubuntu 提供 QEMU 6.2.0，低于参考教程推荐的 7.0，本实例已用它通过 ch1 启动验收。每个后续实验仍以实测结果为准。
+
+使用 QEMU TCG 运行两次，串口分别输出 `Hello, world!`，退出码均为 0。挂起场景在 2 秒后返回 124，检查无残留对应 QEMU 进程。在嵌套 SSH 终端重跑 ch1 时，给命令加 `</dev/null`，以便 QEMU 无交互运行。日志在 `/hy-tmp/proj20-evidence/rental-ch1-noninteractive.log`。
+
+从当前客户端直连公开 SSH 端口会在握手前重置。JupyterLab 可登录同一实例，从 Codespace 中转到同一实例的 SSH 握手、主机指纹核对和密码验证也已通过。历史 ch3/ch4 验收日志在 `/hy-tmp/proj20-evidence/codespace-baseline`。
