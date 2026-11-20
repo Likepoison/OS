@@ -21,3 +21,7 @@
 Rust/RISC-V64/QEMU 和 crate 组件结构是验收约束。逐个核对参赛内核或模块的单元测试、系统测试和 crates.io 打包条件。实验指导使用 Markdown，图使用 Mermaid 等文本表示。
 
 赛题另外列出的评审维度权重为创新性 30%、完整性 20%、代码质量 25%、文档完整性 25%。
+
+## 文件命名
+
+沿用 TraceTutor（proj56）的仓库习惯。根说明使用 `README.md`，新增文档和素材用简短的英文用途名，多词可用连字符，如 `first-boot.md`。新增 Rust 源文件按 Rust 惯例用小写下划线，独立测试放在对应 crate 的 `tests/` 目录，使用 `test_功能名.rs` 的形式，如 `test_trace.rs`。实验章节沿用 `ch3`、`ch4`、`ch5`、`ch6`、`ch8` 编号。正式材料使用「项目名-材料类型」。
