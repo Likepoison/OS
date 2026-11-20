@@ -125,6 +125,47 @@ function setupPetVoice(input, message, resize) {
   return stop;
 }
 
+function makeStudyMemory() {
+  const collection = "/api/pet/sessions";
+  const json = {"Content-Type": "application/json"};
+  let path, generation = 0, queue = Promise.resolve();
+  function closePath(url) {
+    if (!navigator.sendBeacon(url + "/close")) {
+      fetch(url + "/close", {method: "POST", keepalive: true}).catch(() => {});
+    }
+  }
+  function request(action) {
+    const version = generation;
+    const next = queue.then(async () => {
+      if (version !== generation) return null;
+      if (!path) {
+        const {id} = await api(collection, {method: "POST", headers: json});
+        const started = collection + "/" + id;
+        if (version !== generation) {
+          closePath(started);
+          return null;
+        }
+        path = started;
+      }
+      return action(path);
+    });
+    queue = next.catch(() => null);
+    return next;
+  }
+  const write = event => request(url => api(url, {method: "POST", headers: json, body: JSON.stringify(event)}));
+  const read = lab => request(url => api(url + "?" + new URLSearchParams({lab})));
+  setInterval(() => {
+    if (path) request(url => api(url + "/touch", {method: "POST", headers: json})).catch(() => {});
+  }, 90000);
+  function close() {
+    generation++;
+    if (path) closePath(path);
+    path = undefined;
+    queue = Promise.resolve();
+  }
+  return {write, read, close};
+}
+
 function makeCompanion(activeLab, openResult) {
   const avatar = byId("pet-launch"), panel = byId("pet-panel");
   const bubble = byId("pet-bubble"), reset = byId("pet-reset");
@@ -133,8 +174,8 @@ function makeCompanion(activeLab, openResult) {
   const input = byId("pet-input");
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let view = "grade", visibleEvents, selectedEvent;
-  const learning = new Map(), counted = new Set();
-  const memory = {views: [], events: [], exchanges: []};
+  const memory = makeStudyMemory(), memoryStatus = byId("pet-memory-status");
+  let lastVisit;
   let celebration, bubbleTimer;
   const stopVoice = setupPetVoice(input, message, () => place(panel));
 
@@ -153,6 +194,7 @@ function makeCompanion(activeLab, openResult) {
   function speak(text) {
     message.textContent = text;
     place(panel);
+    return text;
   }
 
   function hideBubble() {
@@ -217,19 +259,20 @@ function makeCompanion(activeLab, openResult) {
     openResult(activeRun.id, kind);
   }
 
-  function showQuiz() {
+  async function showQuiz() {
     const lab = activeLab();
     const lesson = petLessons[lab];
     if (!lesson) return speak("选择一个实验，我就能给你出一道相关的小题。");
-    const status = study(lab);
+    const status = (await readMemory(lab))?.study;
+    if (panel.hidden || lab !== activeLab()) return;
     const [question, options, correct, explanation] = lesson;
-    speak(status.answers.some(answer => !answer.correct)
+    const reply = speak(status && status.answers > status.correct
       ? "再用一道概念题确认刚才的知识点。可以回看系统调用后再答。"
       : "来做一道概念题。答错了也可以再试。");
     byId("pet-question").textContent = question;
     choices.replaceChildren(...options.map((option, i) => button(option, () => {
       const isCorrect = i === correct;
-      status.answers.push({choice: i, correct: isCorrect});
+      remember({type: "answer", lab, choice: i, correct: isCorrect});
       speak(isCorrect ? "答对啦！" + explanation : "再想一步。先分清轨迹里看到的事实和推断，再选一次。");
       if (isCorrect) {
         quiz.hidden = true;
@@ -241,42 +284,53 @@ function makeCompanion(activeLab, openResult) {
     quiz.hidden = false;
     choices.firstElementChild.focus();
     place(panel);
+    return reply;
   }
 
-  function study(lab) {
-    if (!learning.has(lab)) learning.set(lab, {runs: [], answers: []});
-    return learning.get(lab);
+  function showMemoryStatus(text = "") {
+    memoryStatus.textContent = text;
+    memoryStatus.hidden = !text;
+    place(panel);
+  }
+
+  function remember(event) {
+    memory.write(event).then(() => showMemoryStatus()).catch(error => showMemoryStatus(error.message));
+  }
+
+  async function readMemory(lab = activeLab()) {
+    try {
+      return await memory.read(lab);
+    } catch (error) {
+      showMemoryStatus(error.message);
+      return null;
+    }
   }
 
   function recordRun(run) {
-    if (!run?.lab || !run.score || counted.has(run.id)) return;
-    counted.add(run.id);
-    study(run.lab).runs.push(run);
+    if (run?.lab && run.score) remember({type: "run", lab: run.lab, score: run.score, run_id: run.id});
   }
 
-  function reportProgress() {
-    const status = study(activeLab());
-    const score = status.runs.at(-1)?.score;
-    const correct = status.answers.filter(answer => answer.correct).length;
+  async function reportProgress() {
+    const snapshot = await readMemory();
+    if (!snapshot) return speak("当前无法读取本轮学习进度。");
+    const {runs, answers, correct, score} = snapshot.study;
     const recent = score ? "最近一次通过 " + score.join("/") + " 个用例。" : "";
     const next = score && score[0] < score[1]
       ? "下一步可以查看失败用例和对应轨迹。"
-      : status.answers.length > correct ? "下一步可回看刚才的概念，再试一次。"
+      : answers > correct ? "下一步可回看刚才的概念，再试一次。"
       : "可以做一道概念题来检验理解。";
-    speak("当前实验评测 " + status.runs.length + " 次。" + recent +
-      "概念题答对 " + correct + "/" + status.answers.length + " 次。" + next);
+    return speak("当前实验评测 " + runs + " 次。" + recent +
+      "概念题答对 " + correct + "/" + answers + " 次。" + next);
   }
 
-  function recap() {
-    const evaluations = Array.from(learning.values()).reduce((total, status) => total + status.runs.length, 0);
-    const quizzes = Array.from(learning.values()).reduce((total, status) => total + status.answers.length, 0);
-    const last = memory.exchanges.findLast(entry => !recallQuestion.test(entry.question));
-    const event = memory.events.at(-1);
-    const visited = new Set(memory.views.map(entry => entry.view)).size;
-    speak("本轮看过 " + visited + " 个页面区域，完成 " + evaluations + " 次评测、" + quizzes +
-      " 次小测作答，提出 " + memory.exchanges.length + " 个问题。" +
+  async function recap() {
+    const snapshot = await readMemory();
+    if (!snapshot) return speak("当前无法读取本轮回顾。");
+    const {views, runs, answers, questions, last_event: event, previous_reply: previous} = snapshot;
+    return speak("本轮看过 " + views + " 个页面区域，完成 " + runs + " 次评测、" + answers +
+      " 次小测作答，提出 " + questions + " 个问题。" +
       (event ? "最近关注的是事件 #" + event.id + " 的 " + event.call + "。" : "") +
-      (last ? "上一问的建议是：" + last.reply : ""));
+      (previous ? "上一问的建议是：" + previous : ""));
   }
 
   function observe(next, total) {
@@ -284,9 +338,10 @@ function makeCompanion(activeLab, openResult) {
     view = next;
     visibleEvents = total;
     selectedEvent = undefined;
-    const previous = memory.views.at(-1);
-    if (!previous || previous.view !== view || previous.total !== total || previous.runId !== activeRun?.id) {
-      memory.views.push({view, total, runId: activeRun?.id});
+    const runId = activeRun?.id;
+    if (!lastVisit || lastVisit.view !== view || lastVisit.total !== total || lastVisit.runId !== runId) {
+      lastVisit = {view, total, runId};
+      remember({type: "view", view, total, run_id: runId});
     }
     if (changed && (view === "history" || ((view === "trace" || view === "hints") && activeRun?.hasResult))) {
       explainView();
@@ -296,7 +351,7 @@ function makeCompanion(activeLab, openResult) {
 
   function explain(event) {
     selectedEvent = event;
-    memory.events.push(event);
+    remember({type: "event", ...event});
     if (avatar.hidden) {
       avatar.hidden = false;
       byId("pet-restore").hidden = true;
@@ -312,7 +367,7 @@ function makeCompanion(activeLab, openResult) {
       : kind === "pending" ? "采集结束时尚未观察到返回。"
       : kind === "partial" ? "这条记录只有调用的一部分。"
       : "";
-    speak("事件 #" + id + " 的 " + call + "。" + observation +
+    return speak("事件 #" + id + " 的 " + call + "。" + observation +
       (clue || "可以沿着对应的原始日志行，检查参数和返回值。"));
   }
 
@@ -326,11 +381,12 @@ function makeCompanion(activeLab, openResult) {
     speak("当前是测试判定。先对照用例输入和输出，再看与失败相关的调用。");
   }
 
-  function respond(text) {
+  async function respond(text) {
     if (recallQuestion.test(text)) return recap();
     if (/进度|学得|学到哪|答了几|小结|掌握/.test(text)) return reportProgress();
-    if (/刚才.*(那条|事件|调用)|之前.*(那条|事件|调用)/.test(text) && memory.events.length) {
-      return explainSelected(memory.events.at(-1));
+    if (/刚才.*(那条|事件|调用)|之前.*(那条|事件|调用)/.test(text)) {
+      const event = (await readMemory())?.last_event;
+      return event ? explainSelected(event) : explainView();
     }
     if (/正在看|在看什么|当前页面|这页|这条|这个调用|刚才那条/.test(text)) return explainView();
     if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
@@ -459,21 +515,20 @@ function makeCompanion(activeLab, openResult) {
     place(panel);
     byId("pet-close").focus();
   });
-  byId("pet-form").addEventListener("submit", event => {
+  byId("pet-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = input.value.trim();
     input.value = "";
     activeRun = undefined;
     lastUpdate = undefined;
     if (!text) return;
-    respond(text);
-    memory.exchanges.push({question: text, reply: message.textContent});
+    const reply = await respond(text);
+    remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(text)});
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {
-    learning.clear();
-    counted.clear();
-    for (const entries of Object.values(memory)) entries.length = 0;
+    memory.close();
+    lastVisit = undefined;
     input.value = "";
     selectedEvent = undefined;
     visibleEvents = undefined;

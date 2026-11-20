@@ -37,7 +37,9 @@ class Demo(TestCase):
 
                 with sync_playwright() as runtime:
                     browser = runtime.chromium.launch()
-                    page = browser.new_page(viewport={"width": 1440, "height": 960})
+                    context = browser.new_context(viewport={"width": 1440, "height": 960})
+                    page = context.new_page()
+                    session_ids = []
                     page.add_init_script("""
                         window.SpeechRecognition = class {
                           start() { window.currentDictation = this; }
@@ -47,6 +49,12 @@ class Demo(TestCase):
                     """)
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
+
+                    def capture_session(response):
+                        if response.url.endswith("/api/pet/sessions") and response.status == 201:
+                            session_ids.append(response.json()["id"])
+
+                    page.on("response", capture_session)
                     page.route("**/api/labs", lambda route: route.fulfill(
                         status=200, content_type="text/html", body="<p>Sign in to continue</p>"))
                     page.goto("http://127.0.0.1:8000")
@@ -110,7 +118,9 @@ class Demo(TestCase):
                     pet_panel.get_by_role("textbox", name="问鲸鱼娘").press("Enter")
                     expect(pet_reply).to_contain_text("我可以陪你看本次结果")
                     self.assertNotIn(user_text, pet_panel.inner_text())
-                    self.assertTrue(all(req.method == "GET" and "/pet/" in req.url for req in requests))
+                    self.assertTrue(all("/api/pet/sessions" in req.url or
+                                        (req.method == "GET" and "/pet/" in req.url) for req in requests))
+                    self.assertEqual(page.evaluate("localStorage.length + sessionStorage.length"), 0)
                     page.remove_listener("request", collect)
                     pet_panel.get_by_role("button", name="回到角落").click()
                     self.assertEqual(pet.bounding_box()["x"], original["x"])
@@ -252,7 +262,9 @@ class Demo(TestCase):
                     if out:
                         page.screenshot(path=f"{out}/mobile.png", full_page=True)
                     self.assertEqual(errors, [])
-                    context = page.context
+                    self.assertTrue(session_ids)
+                    session_url = "http://127.0.0.1:8000/api/pet/sessions/" + session_ids[-1]
+                    self.assertEqual(context.request.get(session_url).status, 200)
                     page.close()
                     fresh = context.new_page()
                     fresh.goto("http://127.0.0.1:8000")
@@ -260,6 +272,10 @@ class Demo(TestCase):
                     fresh.get_by_role("button", name="鲸鱼娘助教").click()
                     fresh.get_by_role("button", name="本轮回顾").click()
                     expect(fresh.locator("#pet-reply")).to_contain_text("完成 0 次评测、0 次小测作答，提出 0 个问题")
+                    deadline = monotonic() + 4
+                    while context.request.get(session_url).status != 404:
+                        self.assertLess(monotonic(), deadline, "closing the tab did not delete its study session")
+                        sleep(.1)
                     browser.close()
             finally:
                 server.terminate()

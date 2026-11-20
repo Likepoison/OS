@@ -10,12 +10,13 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Thread
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from engine import ai_hints, evaluate, events_from
 from labs import LABS, sample
+from pet_memory import StudyMemory, clean_event
 
 DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
@@ -28,6 +29,8 @@ MAX_SOURCE = 32_768
 LIMIT = 8
 WORKERS = ThreadPoolExecutor(max_workers=2)
 SLOTS = BoundedSemaphore(LIMIT)
+PET_MEMORY = StudyMemory()
+PET_ROUTE = re.compile(r"/api/pet/sessions/([a-f0-9]{32})(?:/(close|touch))?")
 logging.basicConfig(level=logging.INFO)
 
 
@@ -112,6 +115,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in PET_ASSETS:
             return self.send_data(200, PAGE.with_name("pet").joinpath(Path(url.path).name).read_bytes(),
                                   PET_ASSETS[url.path])
+        pet = PET_ROUTE.fullmatch(url.path)
+        if pet and not pet[2]:
+            lab = parse_qs(url.query).get("lab", [""])[0]
+            return self.pet_memory_request(pet[1], lab=lab)
         if url.path == "/api/labs":
             return self.send_data(200, {
                 "ai": bool(os.getenv("DEEPSEEK_API_KEY")),
@@ -177,7 +184,39 @@ class Handler(BaseHTTPRequestHandler):
                             group[stream] = group[stream][:8192] + "\n[页面显示已截取]"
         return self.send_data(200, {**record, "result": result})
 
+    def pet_memory_request(self, token, **kwargs):
+        try:
+            return self.send_data(200, PET_MEMORY.request(token, **kwargs))
+        except KeyError:
+            return self.send_data(404, {"error": "本轮桌宠记忆已结束。"})
+        except OverflowError:
+            return self.send_data(429, {"error": "本轮桌宠记忆已满。请先回顾已记录内容。"})
+
     def do_POST(self):
+        if self.path == "/api/pet/sessions":
+            if self.headers.get_content_type() != "application/json":
+                return self.send_data(415, {"error": "请提交 JSON"})
+            token = PET_MEMORY.create()
+            if token is None:
+                return self.send_data(503, {"error": "桌宠会话暂时已满。"})
+            return self.send_data(HTTPStatus.CREATED, {"id": token})
+        if pet := PET_ROUTE.fullmatch(self.path):
+            if pet[2] == "close":
+                PET_MEMORY.close(pet[1])
+                return self.send_data(200, {"ok": True})
+            if self.headers.get_content_type() != "application/json":
+                return self.send_data(415, {"error": "请提交 JSON"})
+            if pet[2] == "touch":
+                return self.pet_memory_request(pet[1])
+            try:
+                size = int(self.headers.get("Content-Length", 0))
+                if not 0 < size <= 4096:
+                    return self.send_data(413, {"error": "桌宠记录超出限制。"})
+                data = json.loads(self.rfile.read(size))
+                event = clean_event(data)
+            except (ValueError, TypeError, AttributeError, TimeoutError, RecursionError):
+                return self.send_data(400, {"error": "桌宠记录格式无效。"})
+            return self.pet_memory_request(pet[1], event=event)
         if self.path != "/api/runs":
             return self.send_data(404, {"error": "地址不存在"})
         if self.headers.get_content_type() != "application/json":
@@ -216,6 +255,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     initialize()
+    Thread(target=PET_MEMORY.reap, daemon=True).start()
     with ThreadingHTTPServer(("127.0.0.1", 8000), Handler) as server:
         print("TraceTutor · http://127.0.0.1:8000", flush=True)
         try:

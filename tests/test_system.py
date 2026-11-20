@@ -103,6 +103,35 @@ class Evaluation(TestCase):
                 self.assertEqual((run["state"], run["outcome"]), ("platform_error", "trace_error"))
                 self.assertFalse(json.loads(run["result"])["scored"])
 
+    def test_study_memory_isolation_close_and_expiry(self):
+        from pet_memory import IDLE_SECONDS, StudyMemory, clean_event
+
+        now = [0]
+        memory = StudyMemory(clock=lambda: now[0])
+        first, second = memory.create(), memory.create()
+        for event in [
+            {"type": "view", "view": "trace", "total": 4},
+            {"type": "event", "id": 13, "call": "pipe2", "kind": "syscall"},
+            {"type": "question", "question": "怎么解释上一条", "reply": "先看参数。"},
+            {"type": "run", "lab": "pipe", "score": [1, 2]},
+            {"type": "answer", "lab": "pipe", "choice": 1, "correct": False},
+        ]:
+            memory.request(first, event=clean_event(event))
+        snapshot = memory.request(first, lab="pipe")
+        self.assertEqual(snapshot["study"], {"runs": 1, "answers": 1, "correct": 0, "score": [1, 2]})
+        self.assertEqual((snapshot["views"], snapshot["questions"], snapshot["last_event"]["id"]), (1, 1, 13))
+        self.assertEqual(snapshot["previous_reply"], "先看参数。")
+        self.assertEqual(memory.request(second, lab="pipe")["questions"], 0)
+        memory.close(first)
+        with self.assertRaises(KeyError):
+            memory.request(first, lab="pipe")
+        now[0] = IDLE_SECONDS - 1
+        memory.request(second)
+        now[0] += IDLE_SECONDS + 1
+        memory.expire()
+        with self.assertRaises(KeyError):
+            memory.request(second, lab="pipe")
+
     def test_failed_queue_submission_returns_json_and_releases_slot(self):
         slots = BoundedSemaphore(1)
         with TemporaryDirectory() as temp, patch.object(app, "DATABASE", Path(temp) / "test.sqlite3"):
