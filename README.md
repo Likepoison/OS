@@ -9,6 +9,7 @@
 
 ### proj20 从这里开始
 
+- [云端复现实验](docs/proj20/cloud-setup.md)
 - [云端工具和实测记录](docs/proj20/cloud-baseline.md)
 - [零基础第一课：启动内核](docs/proj20/first-boot.md)
 - [ch3 系统调用计数练习](docs/proj20/ch3-syscall-count.md)
@@ -17,6 +18,7 @@
 - [ch6 硬链接与 inode 生命周期练习](docs/proj20/ch6-hard-links.md)
 - [ch8 死锁检测练习](docs/proj20/ch8-deadlock-detection.md)
 - [五章实验与验收清单](docs/proj20/acceptance.md)
+- [系统测试、单元测试与打包记录](docs/proj20/verification.md)
 - [学习复盘与对照记录表](docs/proj20/learning-review.md)
 
 在云端准备工具后，从仓库根目录运行：

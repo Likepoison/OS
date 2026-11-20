@@ -6,7 +6,7 @@
 
 ```bash
 cd tg-rcore-tutorial-ch1
-cargo run </dev/null
+RUSTUP_TOOLCHAIN=1.100.0 cargo run </dev/null
 ```
 
 看到 `Hello, world!` 后，终端应返回命令提示符。打开 `src/main.rs`，找出负责输出字符和负责关机的两处调用。
