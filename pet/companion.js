@@ -40,6 +40,7 @@ const callClues = {
   wait4: "wait4 等待子进程状态发生变化，并可读取其退出状态。"
 };
 const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
+const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本轮小结/;
 
 function setupPetVoice(input, message, resize) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
@@ -78,6 +79,7 @@ function setupPetVoice(input, message, resize) {
       if (listener !== active) return;
       const text = event.results[event.resultIndex]?.[0]?.transcript.trim();
       clearListener();
+      active.stop();
       if (!text) return note("没有听清，可以再说一次或直接输入文字。");
       input.value = text.slice(0, input.maxLength);
       note("已转写。确认文字后发送。");
@@ -132,6 +134,7 @@ function makeCompanion(activeLab, openResult) {
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let view = "grade", visibleEvents, selectedEvent;
   const learning = new Map(), counted = new Set();
+  const memory = {views: [], events: [], exchanges: []};
   let celebration, bubbleTimer;
   const stopVoice = setupPetVoice(input, message, () => place(panel));
 
@@ -220,14 +223,13 @@ function makeCompanion(activeLab, openResult) {
     if (!lesson) return speak("选择一个实验，我就能给你出一道相关的小题。");
     const status = study(lab);
     const [question, options, correct, explanation] = lesson;
-    speak(status.answers > status.correct
+    speak(status.answers.some(answer => !answer.correct)
       ? "再用一道概念题确认刚才的知识点。可以回看系统调用后再答。"
       : "来做一道概念题。答错了也可以再试。");
     byId("pet-question").textContent = question;
     choices.replaceChildren(...options.map((option, i) => button(option, () => {
       const isCorrect = i === correct;
-      status.answers++;
-      if (isCorrect) status.correct++;
+      status.answers.push({choice: i, correct: isCorrect});
       speak(isCorrect ? "答对啦！" + explanation : "再想一步。先分清轨迹里看到的事实和推断，再选一次。");
       if (isCorrect) {
         quiz.hidden = true;
@@ -242,27 +244,39 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function study(lab) {
-    if (!learning.has(lab)) learning.set(lab, {runs: 0, answers: 0, correct: 0});
+    if (!learning.has(lab)) learning.set(lab, {runs: [], answers: []});
     return learning.get(lab);
   }
 
   function recordRun(run) {
     if (!run?.lab || !run.score || counted.has(run.id)) return;
     counted.add(run.id);
-    const status = study(run.lab);
-    status.runs++;
-    status.score = run.score;
+    study(run.lab).runs.push(run);
   }
 
   function reportProgress() {
     const status = study(activeLab());
-    const recent = status.score ? "最近一次通过 " + status.score.join("/") + " 个用例。" : "";
-    const next = status.score && status.score[0] < status.score[1]
+    const score = status.runs.at(-1)?.score;
+    const correct = status.answers.filter(answer => answer.correct).length;
+    const recent = score ? "最近一次通过 " + score.join("/") + " 个用例。" : "";
+    const next = score && score[0] < score[1]
       ? "下一步可以查看失败用例和对应轨迹。"
-      : status.answers > status.correct ? "下一步可回看刚才的概念，再试一次。"
+      : status.answers.length > correct ? "下一步可回看刚才的概念，再试一次。"
       : "可以做一道概念题来检验理解。";
-    speak("当前实验评测 " + status.runs + " 次。" + recent +
-      "概念题答对 " + status.correct + "/" + status.answers + " 次。" + next);
+    speak("当前实验评测 " + status.runs.length + " 次。" + recent +
+      "概念题答对 " + correct + "/" + status.answers.length + " 次。" + next);
+  }
+
+  function recap() {
+    const evaluations = Array.from(learning.values()).reduce((total, status) => total + status.runs.length, 0);
+    const quizzes = Array.from(learning.values()).reduce((total, status) => total + status.answers.length, 0);
+    const last = memory.exchanges.findLast(entry => !recallQuestion.test(entry.question));
+    const event = memory.events.at(-1);
+    const visited = new Set(memory.views.map(entry => entry.view)).size;
+    speak("本轮看过 " + visited + " 个页面区域，完成 " + evaluations + " 次评测、" + quizzes +
+      " 次小测作答，提出 " + memory.exchanges.length + " 个问题。" +
+      (event ? "最近关注的是事件 #" + event.id + " 的 " + event.call + "。" : "") +
+      (last ? "上一问的建议是：" + last.reply : ""));
   }
 
   function observe(next, total) {
@@ -270,6 +284,10 @@ function makeCompanion(activeLab, openResult) {
     view = next;
     visibleEvents = total;
     selectedEvent = undefined;
+    const previous = memory.views.at(-1);
+    if (!previous || previous.view !== view || previous.total !== total || previous.runId !== activeRun?.id) {
+      memory.views.push({view, total, runId: activeRun?.id});
+    }
     if (changed && (view === "history" || ((view === "trace" || view === "hints") && activeRun?.hasResult))) {
       explainView();
       announce();
@@ -278,6 +296,7 @@ function makeCompanion(activeLab, openResult) {
 
   function explain(event) {
     selectedEvent = event;
+    memory.events.push(event);
     if (avatar.hidden) {
       avatar.hidden = false;
       byId("pet-restore").hidden = true;
@@ -286,8 +305,8 @@ function makeCompanion(activeLab, openResult) {
     explainSelected();
   }
 
-  function explainSelected() {
-    const {id, call, kind, errno} = selectedEvent;
+  function explainSelected(event = selectedEvent) {
+    const {id, call, kind, errno} = event;
     const clue = callClues[callAliases[call] || call];
     const observation = errno ? "返回 " + errno + "。"
       : kind === "pending" ? "采集结束时尚未观察到返回。"
@@ -308,7 +327,11 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function respond(text) {
+    if (recallQuestion.test(text)) return recap();
     if (/进度|学得|学到哪|答了几|小结|掌握/.test(text)) return reportProgress();
+    if (/刚才.*(那条|事件|调用)|之前.*(那条|事件|调用)/.test(text) && memory.events.length) {
+      return explainSelected(memory.events.at(-1));
+    }
     if (/正在看|在看什么|当前页面|这页|这条|这个调用|刚才那条/.test(text)) return explainView();
     if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
     if (/deepseek|\bai\b|提示|线索/i.test(text)) {
@@ -335,7 +358,7 @@ function makeCompanion(activeLab, openResult) {
     if (key === lastUpdate) return;
     lastUpdate = key;
     activeRun = run;
-    const contextButtons = [button("来道小测", showQuiz), button("学习进度", reportProgress)];
+    const contextButtons = [button("来道小测", showQuiz), button("学习进度", reportProgress), button("本轮回顾", recap)];
     contextButtons[0].id = "pet-quiz-start";
     if (run?.hasResult) {
       if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
@@ -440,11 +463,33 @@ function makeCompanion(activeLab, openResult) {
     event.preventDefault();
     const text = input.value.trim();
     input.value = "";
-    if (text) respond(text);
+    activeRun = undefined;
+    lastUpdate = undefined;
+    if (!text) return;
+    respond(text);
+    memory.exchanges.push({question: text, reply: message.textContent});
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
+  window.addEventListener("pagehide", () => {
+    learning.clear();
+    counted.clear();
+    for (const entries of Object.values(memory)) entries.length = 0;
+    input.value = "";
+    selectedEvent = undefined;
+    visibleEvents = undefined;
+    message.textContent = "";
+    choices.replaceChildren();
+    quiz.hidden = true;
+    hideBubble();
+  });
   return {update, observe, explain, recordRun};
 }
 
 companion = makeCompanion(() => select.value, openPetResult);
 companion.update(petSnapshot(record));
+companion.observe("grade");
+window.addEventListener("pageshow", event => {
+  if (!event.persisted) return;
+  companion.update(petSnapshot(record));
+  companion.observe(byId("workspace").hidden ? "history" : tab);
+});

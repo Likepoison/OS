@@ -189,6 +189,11 @@ class Demo(TestCase):
                     else:
                         expect(page.get_by_text("规则提示", exact=True)).to_be_visible()
                     expect(page.get_by_text("证据定位", exact=True)).to_be_visible()
+                    pet.click()
+                    prompt.fill("刚才那条调用是什么")
+                    prompt.press("Enter")
+                    expect(pet_reply).to_contain_text("事件 #" + event_number)
+                    pet_panel.get_by_role("button", name="收起").click()
 
                     page.get_by_role("button", name="正确样例").click()
                     run.click()
@@ -200,6 +205,9 @@ class Demo(TestCase):
                     expect(pet_reply).to_contain_text("评测 2 次")
                     expect(pet_reply).to_contain_text("最近一次通过 2/2")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
+                    pet_panel.get_by_role("button", name="本轮回顾").click()
+                    expect(pet_reply).to_contain_text("完成 2 次评测、2 次小测作答")
+                    expect(pet_reply).to_contain_text("最近关注的是事件 #" + event_number)
                     pet_panel.get_by_role("button", name="收起").click()
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
@@ -244,6 +252,14 @@ class Demo(TestCase):
                     if out:
                         page.screenshot(path=f"{out}/mobile.png", full_page=True)
                     self.assertEqual(errors, [])
+                    context = page.context
+                    page.close()
+                    fresh = context.new_page()
+                    fresh.goto("http://127.0.0.1:8000")
+                    expect(fresh.get_by_role("button", name="运行实验")).to_be_enabled()
+                    fresh.get_by_role("button", name="鲸鱼娘助教").click()
+                    fresh.get_by_role("button", name="本轮回顾").click()
+                    expect(fresh.locator("#pet-reply")).to_contain_text("完成 0 次评测、0 次小测作答，提出 0 个问题")
                     browser.close()
             finally:
                 server.terminate()
