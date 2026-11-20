@@ -44,6 +44,12 @@ pub trait PageManager<Meta: VmMeta> {
     /// `flags` 允许分配器按策略回填页属性（例如 COW 或自定义位）。
     fn allocate(&mut self, len: usize, flags: &mut VmFlags<Meta>) -> NonNull<u8>;
 
+    /// 尝试分配物理页。可从内存耗尽恢复的实现应返回 `None`。
+    #[inline]
+    fn try_allocate(&mut self, len: usize, flags: &mut VmFlags<Meta>) -> Option<NonNull<u8>> {
+        Some(self.allocate(len, flags))
+    }
+
     /// 从地址空间释放 `pte` 指示的 `len` 个物理页。
     fn deallocate(&mut self, pte: Pte<Meta>, len: usize) -> usize;
 

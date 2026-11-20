@@ -10,7 +10,6 @@
 
 extern crate alloc;
 
-use alloc::alloc::handle_alloc_error;
 use core::{
     alloc::{GlobalAlloc, Layout},
     cell::UnsafeCell,
@@ -123,11 +122,10 @@ unsafe impl GlobalAlloc for Global {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: 通过 heap_mut() 访问分配器，在单处理器环境下不会有并发的分配请求。
         // layout 的有效性由调用者（Rust 的 alloc 机制）保证。
-        if let Ok((ptr, _)) = heap_mut().allocate_layout::<u8>(layout) {
-            ptr.as_ptr()
-        } else {
-            handle_alloc_error(layout)
-        }
+        // 由调用者决定如何处理内存不足，Vec::try_reserve 等可恢复操作依赖空指针。
+        heap_mut()
+            .allocate_layout::<u8>(layout)
+            .map_or(core::ptr::null_mut(), |(ptr, _)| ptr.as_ptr())
     }
 
     #[inline]

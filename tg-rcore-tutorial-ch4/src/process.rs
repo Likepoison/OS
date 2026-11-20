@@ -20,7 +20,7 @@
 //! - 最后结合 `ch4/src/main.rs`：对齐“进程对象创建”和“调度执行”两条路径。
 
 use crate::{build_flags, parse_flags, Sv39, Sv39Manager};
-use alloc::alloc::alloc_zeroed;
+use alloc::{alloc::alloc_zeroed, boxed::Box};
 use core::alloc::Layout;
 use tg_console::log;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
@@ -28,10 +28,15 @@ use tg_kernel_vm::{
     page_table::{MmuMeta, VAddr, PPN, VPN},
     AddressSpace,
 };
+use tg_syscall::SyscallId;
 use xmas_elf::{
     header::{self, HeaderPt2, Machine},
     program, ElfFile,
 };
+
+// 教程已实现的 syscall 编号均小于 512，固定数组避免处理调用时分配内存。
+const TRACKED_SYSCALLS: usize = 512;
+pub(super) const USER_END: usize = 1 << 38;
 
 /// 进程结构体
 ///
@@ -49,6 +54,8 @@ pub struct Process {
     pub heap_bottom: usize,
     /// 当前程序 break 位置（堆顶）
     pub program_brk: usize,
+    // 独立放在堆上，避免移动进程结构时耗尽调度栈。
+    syscall_counts: Box<[u32; TRACKED_SYSCALLS]>,
 }
 
 impl Process {
@@ -150,7 +157,18 @@ impl Process {
             address_space,
             heap_bottom,
             program_brk: heap_bottom,
+            syscall_counts: Box::new([0; TRACKED_SYSCALLS]),
         })
+    }
+
+    pub(super) fn record_syscall(&mut self, id: SyscallId) {
+        if let Some(count) = self.syscall_counts.get_mut(id.0) {
+            *count = count.saturating_add(1);
+        }
+    }
+
+    pub(super) fn syscall_count(&self, id: usize) -> isize {
+        self.syscall_counts.get(id).copied().unwrap_or(0) as isize
     }
 
     /// 修改程序 break 位置（实现 sbrk 系统调用）。
@@ -160,12 +178,11 @@ impl Process {
     /// - 返回旧的 break 地址，失败返回 None
     pub fn change_program_brk(&mut self, size: isize) -> Option<usize> {
         let old_brk = self.program_brk;
-        let new_brk = self.program_brk as isize + size;
+        let new_brk = old_brk.checked_add_signed(size)?;
         // 不允许堆顶低于堆底
-        if new_brk < self.heap_bottom as isize {
+        if !(self.heap_bottom..USER_END).contains(&new_brk) {
             return None;
         }
-        let new_brk = new_brk as usize;
 
         // 计算旧/新 break 所在页的上界（向上对齐到页边界）
         let old_brk_ceil = VAddr::<Sv39>::new(old_brk).ceil();
@@ -173,9 +190,11 @@ impl Process {
 
         if size > 0 {
             // 扩展堆：映射新页面
-            if new_brk_ceil.val() > old_brk_ceil.val() {
-                self.address_space
-                    .map(old_brk_ceil..new_brk_ceil, &[], 0, build_flags("U_WRV"));
+            if !self.address_space.try_map_zeroed(
+                old_brk_ceil..new_brk_ceil,
+                build_flags("U_WRV"),
+            ) {
+                return None;
             }
         } else if size < 0 {
             // 收缩堆：取消映射多余页面

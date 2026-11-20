@@ -249,6 +249,8 @@ extern "C" fn schedule() -> ! {
                 let ctx = &mut ctx.context;
                 let id: Id = ctx.a(7).into();
                 let args = [ctx.a(0), ctx.a(1), ctx.a(2), ctx.a(3), ctx.a(4), ctx.a(5)];
+                // trace(request=2) 查询 TRACE 时应包含本次调用。
+                unsafe { PROCESSES.get_mut()[0].record_syscall(id) };
                 match tg_syscall::handle(Caller { entity: 0, flow: 0 }, id, args) {
                     Ret::Done(ret) => match id {
                         // exit：移除进程
@@ -257,6 +259,7 @@ extern "C" fn schedule() -> ! {
                         },
                         // 其他系统调用：写回返回值，sepc += 4
                         _ => {
+                            let ctx = unsafe { &mut PROCESSES.get_mut()[0].context.context };
                             *ctx.a_mut(0) = ret as _;
                             ctx.move_next();
                         }
@@ -356,9 +359,9 @@ fn kernel_space(
 /// 与前几章不同，本章的系统调用实现需要进行**地址翻译**：
 /// 用户传入的指针是虚拟地址，内核需要通过页表将其翻译为物理地址才能访问。
 mod impls {
-    use crate::{build_flags, Sv39, PROCESSES};
-    use alloc::alloc::alloc_zeroed;
-    use core::{alloc::Layout, ptr::NonNull};
+    use crate::{build_flags, process::USER_END, Sv39, PROCESSES};
+    use alloc::alloc::{alloc_zeroed, dealloc};
+    use core::{alloc::Layout, ops::Range, ptr::NonNull};
     use tg_console::log;
     use tg_kernel_vm::{
         page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
@@ -428,12 +431,26 @@ mod impls {
         /// 分配物理页面：清零并标记为内核拥有
         #[inline]
         fn allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> NonNull<u8> {
-            *flags |= Self::OWNED;
-            NonNull::new(Self::page_alloc(len)).unwrap()
+            self.try_allocate(len, flags).expect("out of physical pages")
         }
 
-        fn deallocate(&mut self, _pte: Pte<Sv39>, _len: usize) -> usize {
-            todo!()
+        fn try_allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> Option<NonNull<u8>> {
+            let size = len.checked_mul(1 << Sv39::PAGE_BITS)?;
+            let layout = Layout::from_size_align(size, 1 << Sv39::PAGE_BITS).ok()?;
+            let page = NonNull::new(unsafe { alloc_zeroed(layout) })?;
+            *flags |= Self::OWNED;
+            Some(page)
+        }
+
+        fn deallocate(&mut self, pte: Pte<Sv39>, len: usize) -> usize {
+            if !self.check_owned(pte) {
+                return 0;
+            }
+            let layout = Layout::from_size_align(len << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS)
+                .expect("layout matches the owned allocation");
+            // SAFETY: 调用方只为失败的映射回收本次分配的完整连续页块。
+            unsafe { dealloc(self.p_to_v(pte.ppn()).as_ptr(), layout) };
+            len
         }
 
         fn drop_root(&mut self) {
@@ -555,34 +572,67 @@ mod impls {
         }
     }
 
-    /// Trace 系统调用实现（练习题需要完成的部分）
-    ///
-    /// 引入虚存机制后，原来的 trace 实现无效了，需要：
-    /// - 读取时检查用户地址是否可见且可读
-    /// - 写入时检查用户地址是否可见且可写
-    /// - 使用 translate() 方法进行地址翻译和权限检查
+    /// 当前进程的字节访问和系统调用计数。
     impl Trace for SyscallContext {
-        #[inline]
-        fn trace(
-            &self,
-            _caller: Caller,
-            _trace_request: usize,
-            _id: usize,
-            _data: usize,
-        ) -> isize {
-            tg_console::log::info!("trace: not implemented");
-            -1
+        fn trace(&self, caller: Caller, request: usize, id: usize, data: usize) -> isize {
+            let Some(process) = (unsafe { PROCESSES.get_mut() }).get(caller.entity) else {
+                return -1;
+            };
+            let (operation, flags) = match request {
+                0 => ("trace_read", build_flags("URV")),
+                1 => ("trace_write", build_flags("URWV")),
+                2 => return process.syscall_count(id),
+                _ => return -1,
+            };
+            if id >= USER_END {
+                log::debug!("vm op={operation} addr={id:#x} result=invalid-address");
+                return -1;
+            }
+            let space = &process.address_space;
+            let addr = VAddr::new(id);
+            let Some(ptr) = space.translate::<u8>(addr, flags) else {
+                if log::log_enabled!(log::Level::Debug) {
+                    let reason = if space.translate::<u8>(addr, build_flags("UV")).is_some() {
+                        "permission-denied"
+                    } else {
+                        "not-user-mapped"
+                    };
+                    log::debug!("vm op={operation} addr={id:#x} result={reason}");
+                }
+                return -1;
+            };
+            log::debug!("vm op={operation} addr={id:#x} result=allowed");
+            // SAFETY: translate 已检查当前进程的用户可见性和指定访问权限。
+            unsafe {
+                if request == 0 {
+                    ptr.as_ptr().read() as isize
+                } else {
+                    ptr.as_ptr().write(data as u8);
+                    0
+                }
+            }
         }
     }
 
-    /// Memory 系统调用实现（练习题需要完成的部分）
-    ///
-    /// - `mmap`：将物理内存映射到用户虚拟地址空间
-    /// - `munmap`：取消虚拟内存映射
+    fn user_pages(addr: usize, len: usize) -> Option<Range<VPN<Sv39>>> {
+        const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+        if addr >= USER_END || !addr.is_multiple_of(PAGE_SIZE) {
+            return None;
+        }
+        let pages = len.div_ceil(PAGE_SIZE);
+        let start = addr >> Sv39::PAGE_BITS;
+        let end = start.checked_add(pages)?;
+        if end > USER_END >> Sv39::PAGE_BITS {
+            return None;
+        }
+        Some(VPN::new(start)..VPN::new(end))
+    }
+
+    /// 匿名内存映射的创建和撤销。
     impl Memory for SyscallContext {
         fn mmap(
             &self,
-            _caller: Caller,
+            caller: Caller,
             addr: usize,
             len: usize,
             prot: i32,
@@ -590,15 +640,39 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            let Some(range) = user_pages(addr, len) else { return -1 };
+            if prot == 0 || prot & !0x7 != 0 {
+                return -1;
+            }
+            let Some(process) = (unsafe { PROCESSES.get_mut() }).get_mut(caller.entity) else {
+                return -1;
+            };
+            // SAFETY: prot only contains R/W/X. Shifting it places those bits in the PTE.
+            let flags = unsafe { VmFlags::from_raw((prot as usize) << 1) } | build_flags("UV");
+            let mapped = process.address_space.try_map_zeroed(range, flags);
+            log::debug!("vm op=mmap addr={addr:#x} len={len} prot={prot:#x} mapped={mapped}");
+            if mapped { 0 } else { -1 }
         }
 
-        fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+        fn munmap(&self, caller: Caller, addr: usize, len: usize) -> isize {
+            let Some(range) = user_pages(addr, len) else { return -1 };
+            let Some(process) = (unsafe { PROCESSES.get_mut() }).get_mut(caller.entity) else {
+                return -1;
+            };
+            let space = &mut process.address_space;
+            let user = build_flags("UV");
+            // 先检查整个范围，再修改页表。中间有空洞时保留原来的映射。
+            if (range.start.val()..range.end.val()).any(|page| {
+                space.translate::<u8>(VPN::new(page).base(), user).is_none()
+            }) {
+                log::debug!("vm op=munmap addr={addr:#x} len={len} result=not-user-mapped");
+                return -1;
+            }
+            if range.start != range.end {
+                space.unmap(range);
+            }
+            log::debug!("vm op=munmap addr={addr:#x} len={len} result=unmapped");
+            0
         }
     }
 }

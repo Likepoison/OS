@@ -11,6 +11,7 @@
 
 - [云端工具和实测记录](docs/proj20/cloud-baseline.md)
 - [零基础第一课：启动内核](docs/proj20/first-boot.md)
+- [ch4 页表权限练习](docs/proj20/ch4-page-permissions.md)
 - [五章实验与验收清单](docs/proj20/acceptance.md)
 
 在云端准备工具后，从仓库根目录运行：

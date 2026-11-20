@@ -43,15 +43,56 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
 
     /// 向地址空间增加映射关系。
     pub fn map_extern(&mut self, range: Range<VPN<Meta>>, pbase: PPN<Meta>, flags: VmFlags<Meta>) {
-        // map_extern 假设物理页已由外部准备好，此处只负责建立页表项。
-        self.areas.push(range.start..range.end);
+        assert!(self.try_map_extern(range, pbase, flags), "cannot install page mapping");
+    }
+
+    fn try_map_extern(
+        &mut self,
+        range: Range<VPN<Meta>>,
+        pbase: PPN<Meta>,
+        flags: VmFlags<Meta>,
+    ) -> bool {
         let count = range.end.val() - range.start.val();
+        if count == 0 {
+            return true;
+        }
+        if self.areas.try_reserve(1).is_err() {
+            return false;
+        }
         let mut root = self.root();
         let mut mapper = Mapper::new(self, pbase..pbase + count, flags);
         root.walk_mut(Pos::new(range.start, 0), &mut mapper);
-        if !mapper.ans() {
-            // 映射失败，需要回滚吗？
-            todo!()
+        let remaining = mapper.remaining();
+        if remaining != 0 {
+            self.clear_page_entries(range.start..range.start + (count - remaining));
+            return false;
+        }
+        self.areas.push(range);
+        true
+    }
+
+    /// 为未映射的虚页分配零填充的物理页。失败时返回 `false` 并撤销新建的叶子映射。
+    ///
+    /// 使用者应提供支持失败返回的物理页分配器。失败后空的中间页表仍归地址空间所有，可在重试时复用。
+    pub fn try_map_zeroed(&mut self, range: Range<VPN<Meta>>, mut flags: VmFlags<Meta>) -> bool {
+        let count = range.end.val() - range.start.val();
+        if count == 0 {
+            return true;
+        }
+        if self.areas.iter().any(|area| area.start < range.end && range.start < area.end) {
+            return false;
+        }
+        let Some(page) = self.page_manager.try_allocate(count, &mut flags) else {
+            return false;
+        };
+        // SAFETY: 分配器返回 count 个连续物理页，旧内容在映射给用户之前须清零。
+        unsafe { page.as_ptr().write_bytes(0, count << Meta::PAGE_BITS) };
+        let ppn = self.page_manager.v_to_p(page);
+        if self.try_map_extern(range, ppn, flags) {
+            true
+        } else {
+            self.page_manager.deallocate(flags.build_pte(ppn), count);
+            false
         }
     }
 
@@ -105,6 +146,10 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
         }
         self.areas = new_areas;
 
+        self.clear_page_entries(range);
+    }
+
+    fn clear_page_entries(&self, range: Range<VPN<Meta>>) {
         // 清除页表项（将 PTE 设为无效，即写入 0）
         let mut vpn = range.start;
         while vpn < range.end {
