@@ -26,7 +26,7 @@ use tg_console::log;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
 use tg_kernel_vm::{
     page_table::{MmuMeta, VAddr, PPN, VPN},
-    AddressSpace,
+    AddressSpace, sv39::USER_END,
 };
 use tg_syscall::SyscallId;
 use xmas_elf::{
@@ -36,7 +36,6 @@ use xmas_elf::{
 
 // 教程已实现的 syscall 编号均小于 512，固定数组避免处理调用时分配内存。
 const TRACKED_SYSCALLS: usize = 512;
-pub(super) const USER_END: usize = 1 << 38;
 
 /// 进程结构体
 ///

@@ -43,6 +43,7 @@
 mod process;
 /// 处理器模块：定义 PROCESSOR 全局变量和进程管理器 ProcManager
 mod processor;
+mod stride;
 
 #[macro_use]
 extern crate tg_console;
@@ -263,8 +264,9 @@ extern "C" fn rust_main() -> ! {
                             Id::EXIT => unsafe { (*processor).make_current_exited(ret) },
                             _ => {
                                 // 其他系统调用：将返回值写入 a0 寄存器，暂停当前进程
-                                let ctx = &mut task.context.context;
-                                *ctx.a_mut(0) = ret as _;
+                                // spawn/fork 可变更进程表，返回寄存器通过当前 PID 重新定位。
+                                let current = unsafe { (*processor).current().unwrap() };
+                                *current.context.context.a_mut(0) = ret as _;
                                 unsafe { (*processor).make_current_suspend() };
                             }
                         },
@@ -364,6 +366,8 @@ fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
 /// 本模块为 tg-syscall 提供的各个 trait 提供具体实现，
 /// 包括 IO、Process、Scheduling、Clock、Memory 等系统调用接口。
 mod impls {
+    use tg_kernel_vm::sv39::{self, USER_END};
+    use alloc::alloc::dealloc;
     use crate::{
         build_flags, process::Process as ProcStruct, processor::ProcManager, Sv39, APPS, PROCESSOR,
     };
@@ -446,16 +450,33 @@ mod impls {
         /// 分配物理页面并标记为内核所有
         #[inline]
         fn allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> NonNull<u8> {
-            *flags |= Self::OWNED;
-            NonNull::new(Self::page_alloc(len)).unwrap()
+            self.try_allocate(len, flags).expect("out of physical pages")
         }
 
-        fn deallocate(&mut self, _pte: Pte<Sv39>, _len: usize) -> usize {
-            todo!()
+        fn try_allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> Option<NonNull<u8>> {
+            let size = len.checked_mul(1 << Sv39::PAGE_BITS)?;
+            let layout = Layout::from_size_align(size, 1 << Sv39::PAGE_BITS).ok()?;
+            let page = NonNull::new(unsafe { alloc_zeroed(layout) })?;
+            *flags |= Self::OWNED;
+            Some(page)
+        }
+
+        fn deallocate(&mut self, pte: Pte<Sv39>, len: usize) -> usize {
+            if !self.check_owned(pte) {
+                return 0;
+            }
+            let layout = Layout::from_size_align(len << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS)
+                .expect("layout matches the owned allocation");
+            // SAFETY: 失败映射的连续页块使用同一个布局分配。
+            unsafe { dealloc(self.p_to_v(pte.ppn()).as_ptr(), layout) };
+            len
         }
 
         fn drop_root(&mut self) {
-            todo!()
+            let layout = Layout::from_size_align(1 << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS)
+                .expect("root page layout");
+            // SAFETY: new_root allocates exactly one page. release consumes the address space.
+            unsafe { dealloc(self.0.cast().as_ptr(), layout) };
         }
     }
 
@@ -547,6 +568,36 @@ mod impls {
         }
     }
 
+    // 按页验证路径字节。APPS 已有程序名表，无需按用户传入的长度分配缓冲区。
+    fn app_elf(process: &ProcStruct, addr: usize, len: usize) -> Option<ElfFile<'static>> {
+        const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
+        if addr.checked_add(len)? > USER_END || len == 0 {
+            return None;
+        }
+        let matches = |name: &str| {
+            let mut cursor = addr;
+            let mut expected = name.as_bytes();
+            while !expected.is_empty() {
+                let n = (PAGE_SIZE - cursor % PAGE_SIZE).min(expected.len());
+                let Some(ptr) = process.address_space.translate::<u8>(
+                    VAddr::new(cursor), build_flags("URV"),
+                ) else {
+                    return false;
+                };
+                // SAFETY: n 字节均位于已校验可读的同一个用户页内。
+                if unsafe { core::slice::from_raw_parts(ptr.as_ptr(), n) } != &expected[..n] {
+                    return false;
+                }
+                cursor += n;
+                expected = &expected[n..];
+            }
+            true
+        };
+        APPS.iter()
+            .find(|(name, _)| name.len() == len && matches(name))
+            .and_then(|(_, data)| ElfFile::new(data).ok())
+    }
+
     /// 进程管理系统调用实现
     impl Process for SyscallContext {
         /// exit 系统调用：退出当前进程
@@ -582,28 +633,14 @@ mod impls {
         /// 根据用户传入的程序名（需地址翻译），查找对应的 ELF 数据，
         /// 替换当前进程的地址空间。
         fn exec(&self, _caller: Caller, path: usize, count: usize) -> isize {
-            const READABLE: VmFlags<Sv39> = build_flags("RV");
             let current = PROCESSOR.get_mut().current().unwrap();
-            current
-                .address_space
-                .translate::<u8>(VAddr::new(path), READABLE)
-                .map(|ptr| unsafe {
-                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr.as_ptr(), count))
-                })
-                .and_then(|name| APPS.get(name))
-                .and_then(|input| ElfFile::new(input).ok())
-                .map_or_else(
-                    || {
-                        log::error!("unknown app, select one in the list: ");
-                        APPS.keys().for_each(|app| println!("{app}"));
-                        println!();
-                        -1
-                    },
-                    |data| {
-                        current.exec(data);
-                        0
-                    },
-                )
+            let Some(elf) = app_elf(current, path, count) else {
+                log::error!("unknown app, select one in the list:");
+                APPS.keys().for_each(|app| println!("{app}"));
+                return -1;
+            };
+            current.exec(elf);
+            0
         }
 
         /// wait 系统调用：等待子进程退出
@@ -643,14 +680,16 @@ mod impls {
         /// 与 fork+exec 不同，spawn 直接从 ELF 创建新进程，
         /// 无需复制父进程地址空间。
         ///
-        /// TODO: 实现 spawn 系统调用（练习题）
-        fn spawn(&self, _caller: Caller, _path: usize, _count: usize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "spawn: parent pid = {}, not implemented",
-                current.pid.get_usize()
-            );
-            -1
+        fn spawn(&self, _caller: Caller, path: usize, count: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let current = processor.current().expect("running process");
+            let parent = current.pid;
+            let Some(child) = app_elf(current, path, count).and_then(ProcStruct::from_elf) else {
+                return -1;
+            };
+            let pid = child.pid;
+            processor.add(pid, child, parent);
+            pid.get_usize() as isize
         }
 
         /// sbrk 系统调用：调整进程堆空间大小
@@ -678,15 +717,9 @@ mod impls {
 
         /// set_priority 系统调用：设置当前进程优先级
         ///
-        /// TODO: 实现 set_priority 系统调用（练习题：stride 调度算法）
         fn set_priority(&self, _caller: Caller, prio: isize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "set_priority: pid = {}, prio = {}, not implemented",
-                current.pid.get_usize(),
-                prio
-            );
-            -1
+            let process = PROCESSOR.get_mut().current().expect("running process");
+            if process.stride.set_priority(prio) { prio } else { -1 }
         }
     }
 
@@ -726,9 +759,6 @@ mod impls {
 
     /// 内存管理系统调用实现
     impl Memory for SyscallContext {
-        /// mmap 系统调用：映射匿名内存
-        ///
-        /// TODO: 实现 mmap 系统调用（练习题）
         fn mmap(
             &self,
             _caller: Caller,
@@ -739,18 +769,13 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            let process = PROCESSOR.get_mut().current().expect("running process");
+            if sv39::mmap(&mut process.address_space, addr, len, prot) { 0 } else { -1 }
         }
 
-        /// munmap 系统调用：取消内存映射
-        ///
-        /// TODO: 实现 munmap 系统调用（练习题）
         fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+            let process = PROCESSOR.get_mut().current().expect("running process");
+            if sv39::munmap(&mut process.address_space, addr, len) { 0 } else { -1 }
         }
     }
 }

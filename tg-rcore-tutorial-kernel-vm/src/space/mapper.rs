@@ -66,7 +66,7 @@ impl<Meta: VmMeta, M: PageManager<Meta>> Decorator<Meta> for Mapper<'_, Meta, M>
             return Update::Target(Pos::stop());
         }
         let mut flags = VmFlags::VALID;
-        let Some(page) = self.space.page_manager.try_allocate(1, &mut flags) else {
+        let Some(page) = self.space.try_allocate_owned(1, &mut flags) else {
             return Update::Target(Pos::stop());
         };
         let ppn = self.space.page_manager.v_to_p(page);

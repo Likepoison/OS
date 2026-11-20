@@ -359,9 +359,10 @@ fn kernel_space(
 /// 与前几章不同，本章的系统调用实现需要进行**地址翻译**：
 /// 用户传入的指针是虚拟地址，内核需要通过页表将其翻译为物理地址才能访问。
 mod impls {
-    use crate::{build_flags, process::USER_END, Sv39, PROCESSES};
+    use crate::{build_flags, Sv39, PROCESSES};
     use alloc::alloc::{alloc_zeroed, dealloc};
-    use core::{alloc::Layout, ops::Range, ptr::NonNull};
+    use core::{alloc::Layout, ptr::NonNull};
+    use tg_kernel_vm::sv39::{self, USER_END};
     use tg_console::log;
     use tg_kernel_vm::{
         page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
@@ -614,20 +615,6 @@ mod impls {
         }
     }
 
-    fn user_pages(addr: usize, len: usize) -> Option<Range<VPN<Sv39>>> {
-        const PAGE_SIZE: usize = 1 << Sv39::PAGE_BITS;
-        if addr >= USER_END || !addr.is_multiple_of(PAGE_SIZE) {
-            return None;
-        }
-        let pages = len.div_ceil(PAGE_SIZE);
-        let start = addr >> Sv39::PAGE_BITS;
-        let end = start.checked_add(pages)?;
-        if end > USER_END >> Sv39::PAGE_BITS {
-            return None;
-        }
-        Some(VPN::new(start)..VPN::new(end))
-    }
-
     /// 匿名内存映射的创建和撤销。
     impl Memory for SyscallContext {
         fn mmap(
@@ -640,39 +627,22 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            let Some(range) = user_pages(addr, len) else { return -1 };
-            if prot == 0 || prot & !0x7 != 0 {
-                return -1;
-            }
             let Some(process) = (unsafe { PROCESSES.get_mut() }).get_mut(caller.entity) else {
                 return -1;
             };
-            // SAFETY: prot only contains R/W/X. Shifting it places those bits in the PTE.
-            let flags = unsafe { VmFlags::from_raw((prot as usize) << 1) } | build_flags("UV");
-            let mapped = process.address_space.try_map_zeroed(range, flags);
+            let mapped = sv39::mmap(&mut process.address_space, addr, len, prot);
             log::debug!("vm op=mmap addr={addr:#x} len={len} prot={prot:#x} mapped={mapped}");
             if mapped { 0 } else { -1 }
         }
 
         fn munmap(&self, caller: Caller, addr: usize, len: usize) -> isize {
-            let Some(range) = user_pages(addr, len) else { return -1 };
             let Some(process) = (unsafe { PROCESSES.get_mut() }).get_mut(caller.entity) else {
                 return -1;
             };
-            let space = &mut process.address_space;
-            let user = build_flags("UV");
-            // 先检查整个范围，再修改页表。中间有空洞时保留原来的映射。
-            if (range.start.val()..range.end.val()).any(|page| {
-                space.translate::<u8>(VPN::new(page).base(), user).is_none()
-            }) {
-                log::debug!("vm op=munmap addr={addr:#x} len={len} result=not-user-mapped");
-                return -1;
-            }
-            if range.start != range.end {
-                space.unmap(range);
-            }
-            log::debug!("vm op=munmap addr={addr:#x} len={len} result=unmapped");
-            0
+            let unmapped = sv39::munmap(&mut process.address_space, addr, len);
+            let result = if unmapped { "unmapped" } else { "not-user-mapped" };
+            log::debug!("vm op=munmap addr={addr:#x} len={len} result={result}");
+            if unmapped { 0 } else { -1 }
         }
     }
 }

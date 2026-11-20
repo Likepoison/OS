@@ -9,6 +9,7 @@
 #![deny(warnings, missing_docs)]
 
 mod space;
+pub mod sv39;
 
 pub extern crate page_table;
 pub use space::AddressSpace;

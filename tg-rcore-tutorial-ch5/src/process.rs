@@ -21,14 +21,14 @@
 //! - 最后看 `exec`：对比“保留 PID、替换执行映像”的设计含义。
 
 use crate::{build_flags, map_portal, parse_flags, Sv39, Sv39Manager};
-use alloc::alloc::alloc_zeroed;
-use core::alloc::Layout;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
 use tg_kernel_vm::{
-    page_table::{MmuMeta, VAddr, PPN, VPN},
+    page_table::{MmuMeta, VAddr, VPN},
     AddressSpace,
 };
+use tg_kernel_vm::sv39::USER_END;
 use tg_task_manage::ProcId;
+use crate::stride::Stride;
 use xmas_elf::{
     header::{self, HeaderPt2, Machine},
     program, ElfFile,
@@ -50,6 +50,7 @@ pub struct Process {
     pub heap_bottom: usize,
     /// 当前程序 break 位置（堆顶），通过 sbrk 调整
     pub program_brk: usize,
+    pub(super) stride: Stride,
 }
 
 impl Process {
@@ -59,8 +60,10 @@ impl Process {
     /// 原有的地址空间会被释放，物理页面被回收。
     pub fn exec(&mut self, elf: ElfFile) {
         let proc = Process::from_elf(elf).unwrap();
-        self.address_space = proc.address_space;
+        let old_space = core::mem::replace(&mut self.address_space, proc.address_space);
         self.context = proc.context;
+        // SAFETY: exec 在内核地址空间中执行，旧的用户地址空间已不会再次调度。
+        unsafe { old_space.release() };
         self.heap_bottom = proc.heap_bottom;
         self.program_brk = proc.program_brk;
     }
@@ -89,6 +92,7 @@ impl Process {
             address_space,
             heap_bottom: self.heap_bottom,
             program_brk: self.program_brk,
+            stride: Stride::new(),
         })
     }
 
@@ -164,15 +168,10 @@ impl Process {
 
         // 映射用户栈：2 页 = 8 KiB，位于虚拟地址空间高位
         // 栈顶为 1 << 38（256 GiB），栈底为 (1<<38) - 8KiB
-        let stack = unsafe {
-            alloc_zeroed(Layout::from_size_align_unchecked(
-                2 << Sv39::PAGE_BITS,
-                1 << Sv39::PAGE_BITS,
-            ))
-        };
-        address_space.map_extern(
+        address_space.map(
             VPN::new((1 << 26) - 2)..VPN::new(1 << 26),
-            PPN::new(stack as usize >> Sv39::PAGE_BITS),
+            &[],
+            0,
             build_flags("U_WRV"),
         );
 
@@ -192,6 +191,7 @@ impl Process {
             address_space,
             heap_bottom,
             program_brk: heap_bottom,
+            stride: Stride::new(),
         })
     }
 
@@ -203,12 +203,11 @@ impl Process {
     /// - 返回旧的 break 地址，失败返回 None
     pub fn change_program_brk(&mut self, size: isize) -> Option<usize> {
         let old_brk = self.program_brk;
-        let new_brk = self.program_brk as isize + size;
+        let new_brk = old_brk.checked_add_signed(size)?;
         // 不允许堆顶低于堆底
-        if new_brk < self.heap_bottom as isize {
+        if !(self.heap_bottom..USER_END).contains(&new_brk) {
             return None;
         }
-        let new_brk = new_brk as usize;
 
         // 按页对齐计算需要映射/取消映射的页面范围
         let old_brk_ceil = VAddr::<Sv39>::new(old_brk).ceil();
@@ -216,9 +215,11 @@ impl Process {
 
         if size > 0 {
             // 扩展堆：映射新页面
-            if new_brk_ceil.val() > old_brk_ceil.val() {
-                self.address_space
-                    .map(old_brk_ceil..new_brk_ceil, &[], 0, build_flags("U_WRV"));
+            if !self.address_space.try_map_zeroed(
+                old_brk_ceil..new_brk_ceil,
+                build_flags("U_WRV"),
+            ) {
+                return None;
             }
         } else if size < 0 {
             // 收缩堆：取消映射多余页面

@@ -10,11 +10,8 @@
 //!
 //! ## 调度算法
 //!
-//! 当前使用简单的 **先进先出（FIFO）** / **时间片轮转（RR）** 调度：
-//! - `add`：将进程加入就绪队列尾部
-//! - `fetch`：从就绪队列头部取出下一个要执行的进程
-//!
-//! 练习题要求实现 **stride 调度算法**，需要修改此模块。
+//! 从就绪队列选取累计 stride 最小的进程，同值时按进队顺序。
+//! 发放一次运行机会后，对选中进程按优先级增加 stride。
 //!
 //! 教程阅读建议：
 //!
@@ -61,11 +58,11 @@ pub static PROCESSOR: Processor = Processor::new();
 /// - `tasks`：以 ProcId 为键的进程映射表，存储所有进程实体
 /// - `ready_queue`：就绪队列，存储等待执行的进程 PID
 ///
-/// 当前使用 FIFO/RR 调度策略。练习题要求改为 stride 调度算法。
+/// 就绪队列按 stride 取出任务，并用进队顺序处理并列。
 pub struct ProcManager {
     /// 所有进程实体的映射表
     tasks: BTreeMap<ProcId, Process>,
-    /// 就绪队列（FIFO 调度）
+    /// 就绪队列（进队顺序）
     ready_queue: VecDeque<ProcId>,
 }
 
@@ -96,19 +93,26 @@ impl Manage<Process, ProcId> for ProcManager {
     /// 从进程表中删除进程（回收资源）
     #[inline]
     fn delete(&mut self, id: ProcId) {
-        self.tasks.remove(&id);
+        if let Some(process) = self.tasks.remove(&id) {
+            // SAFETY: 当前已回到内核地址空间，此进程已经从就绪集合移除。
+            unsafe { process.address_space.release() };
+        }
     }
 }
 
-/// 实现 Schedule trait：进程调度（当前为 FIFO/RR）
+/// 实现 Schedule trait：按 stride 调度。
 impl Schedule<ProcId> for ProcManager {
     /// 将进程加入就绪队列尾部
     fn add(&mut self, id: ProcId) {
         self.ready_queue.push_back(id);
     }
 
-    /// 从就绪队列头部取出下一个要执行的进程
+    /// 取出累计 stride 最小的进程，并计入这次调度。
     fn fetch(&mut self) -> Option<ProcId> {
-        self.ready_queue.pop_front()
+        let (index, _) = self.ready_queue.iter().enumerate()
+            .min_by_key(|(_, pid)| self.tasks[pid].stride.total())?;
+        let pid = self.ready_queue.remove(index).expect("selected ready process");
+        self.tasks.get_mut(&pid).expect("ready process exists").stride.charge();
+        Some(pid)
     }
 }

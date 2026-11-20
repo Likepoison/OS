@@ -7,7 +7,7 @@ use crate::PageManager;
 use alloc::vec::Vec;
 use core::{fmt, ops::Range, ptr::NonNull};
 use mapper::Mapper;
-use page_table::{PageTable, PageTableFormatter, Pos, VAddr, VmFlags, VmMeta, PPN, VPN};
+use page_table::{PageTable, PageTableFormatter, Pos, Pte, VAddr, VmFlags, VmMeta, PPN, VPN};
 use visitor::Visitor;
 
 /// 地址空间。
@@ -15,6 +15,7 @@ pub struct AddressSpace<Meta: VmMeta, M: PageManager<Meta>> {
     /// 虚拟地址块（只记录已映射 VPN 区间，便于 clone/unmap 管理）
     pub areas: Vec<Range<VPN<Meta>>>,
     page_manager: M,
+    owned_blocks: Vec<(Pte<Meta>, usize)>,
 }
 
 impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
@@ -24,7 +25,29 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
         Self {
             areas: Vec::new(),
             page_manager: M::new_root(),
+            owned_blocks: Vec::new(),
         }
+    }
+
+    fn try_allocate_owned(&mut self, count: usize, flags: &mut VmFlags<Meta>) -> Option<NonNull<u8>> {
+        self.owned_blocks.try_reserve(1).ok()?;
+        let page = self.page_manager.try_allocate(count, flags)?;
+        let ppn = self.page_manager.v_to_p(page);
+        self.owned_blocks.push((flags.build_pte(ppn), count));
+        Some(page)
+    }
+
+    /// 释放本地址空间分配的物理块、页表页以及根页表。
+    /// 外部映射和通过根页表项共享的页面继续由其原有所有者管理。
+    ///
+    /// # Safety
+    ///
+    /// 本地址空间必须已经停用，且没有其他使用者持有指向这些分配的引用。
+    pub unsafe fn release(mut self) {
+        for (pte, count) in self.owned_blocks.drain(..).rev() {
+            self.page_manager.deallocate(pte, count);
+        }
+        self.page_manager.drop_root();
     }
 
     /// 地址空间根页表的物理页号。
@@ -82,7 +105,7 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
         if self.areas.iter().any(|area| area.start < range.end && range.start < area.end) {
             return false;
         }
-        let Some(page) = self.page_manager.try_allocate(count, &mut flags) else {
+        let Some(page) = self.try_allocate_owned(count, &mut flags) else {
             return false;
         };
         // SAFETY: 分配器返回 count 个连续物理页，旧内容在映射给用户之前须清零。
@@ -91,7 +114,10 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
         if self.try_map_extern(range, ppn, flags) {
             true
         } else {
-            self.page_manager.deallocate(flags.build_pte(ppn), count);
+            let index = self.owned_blocks.iter().position(|(pte, _)| pte.ppn() == ppn)
+                .expect("mapping allocation is registered");
+            let (pte, count) = self.owned_blocks.swap_remove(index);
+            self.page_manager.deallocate(pte, count);
             false
         }
     }
@@ -108,7 +134,8 @@ impl<Meta: VmMeta, M: PageManager<Meta>> AddressSpace<Meta, M> {
         let count = range.end.val() - range.start.val();
         let size = count << Meta::PAGE_BITS;
         assert!(size >= data.len() + offset);
-        let page = self.page_manager.allocate(count, &mut flags);
+        let page = self.try_allocate_owned(count, &mut flags)
+            .expect("out of physical pages");
         // SAFETY: page 是刚分配的有效内存，大小为 size 字节。
         // 我们按顺序填充：[0, offset) 清零，[offset, offset+data.len()) 拷贝数据，
         // [offset+data.len(), size) 清零。
