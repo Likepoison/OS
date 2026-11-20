@@ -225,8 +225,8 @@ extern "C" fn rust_main() -> ! {
                         Ret::Done(ret) => match id {
                             Id::EXIT => unsafe { (*processor).make_current_exited(ret) },
                             _ => {
-                                let ctx = &mut task.context.context;
-                                *ctx.a_mut(0) = ret as _;
+                                let current = unsafe { (*processor).current().unwrap() };
+                                *current.context.context.a_mut(0) = ret as _;
                                 unsafe { (*processor).make_current_suspend() };
                             }
                         },
@@ -337,7 +337,7 @@ fn map_portal(space: &AddressSpace<Sv39, Sv39Manager>) {
 /// - `open`：打开文件，返回文件描述符
 /// - `close`：关闭文件描述符
 /// - `read`/`write`：支持文件读写（不仅限于标准 I/O）
-/// - `linkat`/`unlinkat`/`fstat`：硬链接相关（TODO 练习题）
+/// - `linkat`/`unlinkat`/`fstat`：硬链接相关
 mod impls {
     use crate::{
         build_flags,
@@ -347,12 +347,13 @@ mod impls {
         Sv39, PROCESSOR,
     };
     use alloc::vec::Vec;
-    use alloc::{alloc::alloc_zeroed, string::String};
+    use alloc::alloc::{alloc_zeroed, dealloc};
     use core::{alloc::Layout, ptr::NonNull};
     use spin::Mutex;
     use tg_console::log;
     use tg_easy_fs::UserBuffer;
-    use tg_easy_fs::{FSManager, OpenFlags};
+    use tg_easy_fs::{FSManager, NAME_LENGTH_LIMIT, OpenFlags};
+    use tg_kernel_vm::sv39::{self, USER_END};
     use tg_kernel_vm::{
         page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
         PageManager,
@@ -411,14 +412,33 @@ mod impls {
         }
         #[inline]
         fn allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> NonNull<u8> {
+            self.try_allocate(len, flags).expect("out of physical pages")
+        }
+
+        fn try_allocate(&mut self, len: usize, flags: &mut VmFlags<Sv39>) -> Option<NonNull<u8>> {
+            let size = len.checked_mul(1 << Sv39::PAGE_BITS)?;
+            let layout = Layout::from_size_align(size, 1 << Sv39::PAGE_BITS).ok()?;
+            let page = NonNull::new(unsafe { alloc_zeroed(layout) })?;
             *flags |= Self::OWNED;
-            NonNull::new(Self::page_alloc(len)).unwrap()
+            Some(page)
         }
-        fn deallocate(&mut self, _pte: Pte<Sv39>, _len: usize) -> usize {
-            todo!()
+
+        fn deallocate(&mut self, pte: Pte<Sv39>, len: usize) -> usize {
+            if !self.check_owned(pte) {
+                return 0;
+            }
+            let layout = Layout::from_size_align(len << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS)
+                .expect("layout matches the owned allocation");
+            // SAFETY: 失败映射的连续页块使用同一个布局分配。
+            unsafe { dealloc(self.p_to_v(pte.ppn()).as_ptr(), layout) };
+            len
         }
+
         fn drop_root(&mut self) {
-            todo!()
+            let layout = Layout::from_size_align(1 << Sv39::PAGE_BITS, 1 << Sv39::PAGE_BITS)
+                .expect("root page layout");
+            // SAFETY: new_root allocates exactly one page. release consumes the address space.
+            unsafe { dealloc(self.0.cast().as_ptr(), layout) };
         }
     }
 
@@ -443,6 +463,67 @@ mod impls {
     const READABLE: VmFlags<Sv39> = build_flags("RV");
     /// 可写权限标志
     const WRITEABLE: VmFlags<Sv39> = build_flags("W_V");
+
+    fn user_name<'a>(
+        process: &ProcStruct,
+        start: usize,
+        len: Option<usize>,
+        name: &'a mut [u8; NAME_LENGTH_LIMIT],
+    ) -> Option<&'a str> {
+        if len.is_some_and(|size| size == 0 || size > NAME_LENGTH_LIMIT) {
+            return None;
+        }
+        let read = |offset| {
+            let addr = start.checked_add(offset)?;
+            if addr >= USER_END {
+                return None;
+            }
+            let ptr = process.address_space.translate::<u8>(VAddr::new(addr), build_flags("URV"))?;
+            // SAFETY: 翻译结果指向经过权限检查的当前进程用户字节。
+            Some(unsafe { ptr.as_ptr().read() })
+        };
+        for (index, slot) in name.iter_mut().take(len.unwrap_or(NAME_LENGTH_LIMIT)).enumerate() {
+            let byte = read(index)?;
+            if byte == 0 {
+                if len.is_some() {
+                    return None;
+                }
+                return core::str::from_utf8(&name[..index]).ok();
+            }
+            *slot = byte;
+        }
+        let size = len.unwrap_or(NAME_LENGTH_LIMIT);
+        if len.is_none() && read(size)? != 0 {
+            return None;
+        }
+        core::str::from_utf8(&name[..size]).ok()
+    }
+
+    fn write_stat(process: &ProcStruct, addr: usize, stat: &Stat) -> bool {
+        let size = core::mem::size_of::<Stat>();
+        if addr.checked_add(size).is_none_or(|end| end > USER_END) {
+            return false;
+        }
+        let space = &process.address_space;
+        let flags = build_flags("URWV");
+        let Some(head) = space.translate::<u8>(VAddr::new(addr), flags) else { return false };
+        let first = ((1 << Sv39::PAGE_BITS) - VAddr::<Sv39>::new(addr).offset()).min(size);
+        let tail = if first < size {
+            let Some(ptr) = space.translate::<u8>(VAddr::new(addr + first), flags) else { return false };
+            Some(ptr)
+        } else {
+            None
+        };
+        let data = core::ptr::from_ref(stat).cast::<u8>();
+        // SAFETY: Stat 的 C 布局没有填充空洞，写入前已验证目标页的权限。
+        unsafe {
+            core::ptr::copy_nonoverlapping(data, head.as_ptr(), first);
+            if let Some(tail) = tail {
+                core::ptr::copy_nonoverlapping(data.add(first), tail.as_ptr(), size - first);
+            }
+        }
+        true
+    }
 
     /// IO 系统调用实现：read、write、open、close
     ///
@@ -537,35 +618,14 @@ mod impls {
         /// 通过 easy-fs 文件系统打开文件，分配新的文件描述符。
         fn open(&self, _caller: Caller, path: usize, flags: usize) -> isize {
             let current = PROCESSOR.get_mut().current().unwrap();
-            if let Some(ptr) = current.address_space.translate(VAddr::new(path), READABLE) {
-                // 从用户空间逐字符读取文件路径（需要地址翻译）
-                let mut string = String::new();
-                let mut raw_ptr: *mut u8 = ptr.as_ptr();
-                loop {
-                    unsafe {
-                        let ch = *raw_ptr;
-                        if ch == 0 {
-                            break;
-                        }
-                        string.push(ch as char);
-                        raw_ptr = (raw_ptr as usize + 1) as *mut u8;
-                    }
-                }
-
-                // 通过文件系统打开文件，分配新的文件描述符
-                if let Some(fd) =
-                    FS.open(string.as_str(), OpenFlags::from_bits(flags as u32).unwrap())
-                {
-                    let new_fd = current.fd_table.len();
-                    current.fd_table.push(Some(Mutex::new(fd.as_ref().clone())));
-                    new_fd as isize
-                } else {
-                    -1
-                }
-            } else {
-                log::error!("ptr not writeable");
-                -1
-            }
+            let mut name = [0; NAME_LENGTH_LIMIT];
+            let Some(path) = user_name(current, path, None, &mut name) else { return -1 };
+            let Some(fd) = OpenFlags::from_bits(flags as u32).and_then(|flags| FS.open(path, flags)) else {
+                return -1;
+            };
+            let number = current.fd_table.len();
+            current.fd_table.push(Some(Mutex::new(fd.as_ref().clone())));
+            number as isize
         }
 
         /// close 系统调用：关闭文件描述符
@@ -579,36 +639,45 @@ mod impls {
             0
         }
 
-        /// linkat 系统调用：创建硬链接
-        ///
-        /// TODO: 实现 linkat 系统调用（练习题）
+        /// linkat 系统调用：创建硬链接。
         fn linkat(
             &self,
             _caller: Caller,
             _olddirfd: i32,
-            _oldpath: usize,
+            oldpath: usize,
             _newdirfd: i32,
-            _newpath: usize,
+            newpath: usize,
             _flags: u32,
         ) -> isize {
-            tg_console::log::info!("linkat: not implemented");
-            -1
+            let current = PROCESSOR.get_mut().current().unwrap();
+            let mut old = [0; NAME_LENGTH_LIMIT];
+            let mut new = [0; NAME_LENGTH_LIMIT];
+            let Some(source) = user_name(current, oldpath, None, &mut old) else { return -1 };
+            let Some(target) = user_name(current, newpath, None, &mut new) else { return -1 };
+            FS.link(source, target)
         }
 
-        /// unlinkat 系统调用：删除硬链接
-        ///
-        /// TODO: 实现 unlinkat 系统调用（练习题）
-        fn unlinkat(&self, _caller: Caller, _dirfd: i32, _path: usize, _flags: u32) -> isize {
-            tg_console::log::info!("unlinkat: not implemented");
-            -1
+        /// unlinkat 系统调用：删除目录项。
+        fn unlinkat(&self, _caller: Caller, _dirfd: i32, path: usize, _flags: u32) -> isize {
+            let current = PROCESSOR.get_mut().current().unwrap();
+            let mut name = [0; NAME_LENGTH_LIMIT];
+            let Some(path) = user_name(current, path, None, &mut name) else { return -1 };
+            FS.unlink(path)
         }
 
-        /// fstat 系统调用：获取文件状态
-        ///
-        /// TODO: 实现 fstat 系统调用（练习题）
-        fn fstat(&self, _caller: Caller, _fd: usize, _st: usize) -> isize {
-            tg_console::log::info!("fstat: not implemented");
-            -1
+        /// fstat 系统调用：查询已打开文件的 inode 及链接数。
+        fn fstat(&self, _caller: Caller, fd: usize, st: usize) -> isize {
+            let current = PROCESSOR.get_mut().current().unwrap();
+            let Some(handle) = current.fd_table.get(fd).and_then(Option::as_ref) else { return -1 };
+            let file = handle.lock();
+            let Some((inode, links)) = file.inode.as_ref().and_then(|inode| inode.file_stat()) else {
+                return -1;
+            };
+            let mut status = Stat::new();
+            status.ino = inode as u64;
+            status.nlink = links;
+            status.mode = StatMode::FILE;
+            if write_stat(current, st, &status) { 0 } else { -1 }
         }
     }
 
@@ -639,32 +708,18 @@ mod impls {
         ///
         /// 与第五章不同：程序从 easy-fs 文件系统中读取，而非内存中的 APPS 表
         fn exec(&self, _caller: Caller, path: usize, count: usize) -> isize {
-            const READABLE: VmFlags<Sv39> = build_flags("RV");
             let current = PROCESSOR.get_mut().current().unwrap();
-            current
-                .address_space
-                .translate::<u8>(VAddr::new(path), READABLE)
-                .map(|ptr| unsafe {
-                    core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr.as_ptr(), count))
-                })
-                .and_then(|name| FS.open(name, OpenFlags::RDONLY))
-                .map_or_else(
-                    || {
-                        log::error!("unknown app, select one in the list: ");
-                        // 列出文件系统中所有可用程序
-                        FS.readdir("")
-                            .unwrap()
-                            .into_iter()
-                            .for_each(|app| println!("{app}"));
-                        println!();
-                        -1
-                    },
-                    |fd| {
-                        // 从文件系统读取完整 ELF 数据并加载
-                        current.exec(ElfFile::new(&read_all(fd)).unwrap());
-                        0
-                    },
-                )
+            let mut name = [0; NAME_LENGTH_LIMIT];
+            let Some(fd) = user_name(current, path, Some(count), &mut name)
+                .and_then(|name| FS.open(name, OpenFlags::RDONLY)) else {
+                log::error!("unknown app, select one in the list:");
+                if let Some(apps) = FS.readdir("") {
+                    apps.iter().for_each(|app| println!("{app}"));
+                }
+                return -1;
+            };
+            let data = read_all(fd);
+            if ElfFile::new(&data).is_ok_and(|elf| current.exec(elf)) { 0 } else { -1 }
         }
 
         /// wait 系统调用：等待子进程退出
@@ -693,14 +748,19 @@ mod impls {
             current.pid.get_usize() as _
         }
 
-        /// spawn 系统调用（TODO 练习题）
-        fn spawn(&self, _caller: Caller, _path: usize, _count: usize) -> isize {
-            let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "spawn: parent pid = {}, not implemented",
-                current.pid.get_usize()
-            );
-            -1
+        /// spawn 系统调用：直接从文件系统加载子进程。
+        fn spawn(&self, _caller: Caller, path: usize, count: usize) -> isize {
+            let processor = PROCESSOR.get_mut();
+            let current = processor.current().unwrap();
+            let parent = current.pid;
+            let mut name = [0; NAME_LENGTH_LIMIT];
+            let Some(fd) = user_name(current, path, Some(count), &mut name)
+                .and_then(|name| FS.open(name, OpenFlags::RDONLY)) else { return -1 };
+            let data = read_all(fd);
+            let Some(child) = ElfFile::new(&data).ok().and_then(ProcStruct::from_elf) else { return -1 };
+            let pid = child.pid;
+            processor.add(pid, child, parent);
+            pid.get_usize() as isize
         }
 
         /// sbrk 系统调用：调整堆大小
@@ -721,15 +781,10 @@ mod impls {
             0
         }
 
-        /// set_priority 系统调用（TODO 练习题）
+        /// set_priority 系统调用：设置当前进程的 stride 权重。
         fn set_priority(&self, _caller: Caller, prio: isize) -> isize {
             let current = PROCESSOR.get_mut().current().unwrap();
-            tg_console::log::info!(
-                "set_priority: pid = {}, prio = {}, not implemented",
-                current.pid.get_usize(),
-                prio
-            );
-            -1
+            if current.stride.set_priority(prio) { prio } else { -1 }
         }
     }
 
@@ -765,7 +820,6 @@ mod impls {
 
     /// 内存管理系统调用实现
     impl Memory for SyscallContext {
-        /// mmap 系统调用（TODO 练习题）
         fn mmap(
             &self,
             _caller: Caller,
@@ -776,16 +830,13 @@ mod impls {
             _fd: i32,
             _offset: usize,
         ) -> isize {
-            tg_console::log::info!(
-                "mmap: addr = {addr:#x}, len = {len}, prot = {prot}, not implemented"
-            );
-            -1
+            let current = PROCESSOR.get_mut().current().unwrap();
+            if sv39::mmap(&mut current.address_space, addr, len, prot) { 0 } else { -1 }
         }
 
-        /// munmap 系统调用（TODO 练习题）
         fn munmap(&self, _caller: Caller, addr: usize, len: usize) -> isize {
-            tg_console::log::info!("munmap: addr = {addr:#x}, len = {len}, not implemented");
-            -1
+            let current = PROCESSOR.get_mut().current().unwrap();
+            if sv39::munmap(&mut current.address_space, addr, len) { 0 } else { -1 }
         }
     }
 }

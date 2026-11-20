@@ -27,6 +27,7 @@ use block_cache::{block_cache_sync_all, get_block_cache};
 pub use block_dev::BlockDevice;
 pub use efs::EasyFileSystem;
 pub use file::*;
+pub use layout::NAME_LENGTH_LIMIT;
 use layout::*;
 pub use pipe::{make_pipe, PipeReader, PipeWriter};
 pub use vfs::Inode;

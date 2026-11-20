@@ -43,7 +43,6 @@
 mod process;
 /// 处理器模块：定义 PROCESSOR 全局变量和进程管理器 ProcManager
 mod processor;
-mod stride;
 
 #[macro_use]
 extern crate tg_console;

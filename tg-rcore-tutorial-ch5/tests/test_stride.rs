@@ -1,7 +1,4 @@
-#[path = "../src/stride.rs"]
-mod stride;
-
-use stride::Stride;
+use tg_task_manage::stride::Stride;
 
 #[test]
 fn priority_changes_the_share_of_dispatches() {

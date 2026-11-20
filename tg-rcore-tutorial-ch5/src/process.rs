@@ -28,7 +28,7 @@ use tg_kernel_vm::{
 };
 use tg_kernel_vm::sv39::USER_END;
 use tg_task_manage::ProcId;
-use crate::stride::Stride;
+use tg_task_manage::stride::Stride;
 use xmas_elf::{
     header::{self, HeaderPt2, Machine},
     program, ElfFile,

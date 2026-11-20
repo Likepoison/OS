@@ -13,6 +13,7 @@
 - [零基础第一课：启动内核](docs/proj20/first-boot.md)
 - [ch4 页表权限练习](docs/proj20/ch4-page-permissions.md)
 - [ch5 进程创建与调度练习](docs/proj20/ch5-process-scheduling.md)
+- [ch6 硬链接与 inode 生命周期练习](docs/proj20/ch6-hard-links.md)
 - [五章实验与验收清单](docs/proj20/acceptance.md)
 
 在云端准备工具后，从仓库根目录运行：

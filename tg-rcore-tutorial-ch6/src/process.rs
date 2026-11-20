@@ -19,16 +19,16 @@
 //! - 最后看 `change_program_brk`：理解用户堆扩缩时的页映射变化。
 
 use crate::{build_flags, map_portal, parse_flags, Sv39, Sv39Manager};
-use alloc::{alloc::alloc_zeroed, vec::Vec};
-use core::alloc::Layout;
+use alloc::vec::Vec;
 use spin::Mutex;
 use tg_easy_fs::FileHandle;
 use tg_kernel_context::{foreign::ForeignContext, LocalContext};
 use tg_kernel_vm::{
-    page_table::{MmuMeta, VAddr, PPN, VPN},
+    page_table::{MmuMeta, VAddr, VPN},
     AddressSpace,
 };
-use tg_task_manage::ProcId;
+use tg_kernel_vm::sv39::USER_END;
+use tg_task_manage::{ProcId, stride::Stride};
 use xmas_elf::{
     header::{self, HeaderPt2, Machine},
     program, ElfFile,
@@ -56,16 +56,20 @@ pub struct Process {
     pub heap_bottom: usize,
     /// 当前程序 break 位置（堆顶）
     pub program_brk: usize,
+    pub(super) stride: Stride,
 }
 
 impl Process {
     /// exec：用新程序替换当前进程（保留 PID 和 fd_table）
-    pub fn exec(&mut self, elf: ElfFile) {
-        let proc = Process::from_elf(elf).unwrap();
-        self.address_space = proc.address_space;
+    pub fn exec(&mut self, elf: ElfFile) -> bool {
+        let Some(proc) = Process::from_elf(elf) else { return false };
+        let old_space = core::mem::replace(&mut self.address_space, proc.address_space);
         self.context = proc.context;
+        // SAFETY: exec 在内核地址空间中执行，旧用户地址空间已停用。
+        unsafe { old_space.release() };
         self.heap_bottom = proc.heap_bottom;
         self.program_brk = proc.program_brk;
+        true
     }
 
     /// fork：复制当前进程创建子进程
@@ -100,6 +104,7 @@ impl Process {
             fd_table: new_fd_table,
             heap_bottom: self.heap_bottom,
             program_brk: self.program_brk,
+            stride: Stride::new(),
         })
     }
 
@@ -163,15 +168,10 @@ impl Process {
         let heap_bottom = VAddr::<Sv39>::new(max_end_va).ceil().base().val();
 
         // 映射用户栈（2 页 = 8 KiB）
-        let stack = unsafe {
-            alloc_zeroed(Layout::from_size_align_unchecked(
-                2 << Sv39::PAGE_BITS,
-                1 << Sv39::PAGE_BITS,
-            ))
-        };
-        address_space.map_extern(
+        address_space.map(
             VPN::new((1 << 26) - 2)..VPN::new(1 << 26),
-            PPN::new(stack as usize >> Sv39::PAGE_BITS),
+            &[],
+            0,
             build_flags("U_WRV"),
         );
         // 映射异界传送门
@@ -193,25 +193,27 @@ impl Process {
             ],
             heap_bottom,
             program_brk: heap_bottom,
+            stride: Stride::new(),
         })
     }
 
     /// 修改程序 break 位置（实现 sbrk 系统调用）
     pub fn change_program_brk(&mut self, size: isize) -> Option<usize> {
         let old_brk = self.program_brk;
-        let new_brk = self.program_brk as isize + size;
-        if new_brk < self.heap_bottom as isize {
+        let new_brk = old_brk.checked_add_signed(size)?;
+        if !(self.heap_bottom..USER_END).contains(&new_brk) {
             return None;
         }
-        let new_brk = new_brk as usize;
 
         let old_brk_ceil = VAddr::<Sv39>::new(old_brk).ceil();
         let new_brk_ceil = VAddr::<Sv39>::new(new_brk).ceil();
 
         if size > 0 {
-            if new_brk_ceil.val() > old_brk_ceil.val() {
-                self.address_space
-                    .map(old_brk_ceil..new_brk_ceil, &[], 0, build_flags("U_WRV"));
+            if !self.address_space.try_map_zeroed(
+                old_brk_ceil..new_brk_ceil,
+                build_flags("U_WRV"),
+            ) {
+                return None;
             }
         } else if size < 0 {
             if old_brk_ceil.val() > new_brk_ceil.val() {

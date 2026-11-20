@@ -3,7 +3,7 @@ use super::{
     SuperBlock,
 };
 use crate::BLOCK_SZ;
-use alloc::sync::Arc;
+use alloc::{collections::BTreeMap, sync::{Arc, Weak}};
 use spin::Mutex;
 ///An easy file system on block
 pub struct EasyFileSystem {
@@ -15,6 +15,7 @@ pub struct EasyFileSystem {
     pub data_bitmap: Bitmap,
     inode_area_start_block: u32,
     data_area_start_block: u32,
+    pub(crate) handles: BTreeMap<u32, Weak<Inode>>,
 }
 
 type DataBlock = [u8; BLOCK_SZ];
@@ -41,6 +42,7 @@ impl EasyFileSystem {
         );
         let mut efs = Self {
             block_device: Arc::clone(&block_device),
+            handles: BTreeMap::new(),
             inode_bitmap,
             data_bitmap,
             inode_area_start_block: 1 + inode_bitmap_blocks,
@@ -91,6 +93,7 @@ impl EasyFileSystem {
                     super_block.inode_bitmap_blocks + super_block.inode_area_blocks;
                 let efs = Self {
                     block_device,
+                    handles: BTreeMap::new(),
                     inode_bitmap: Bitmap::new(1, super_block.inode_bitmap_blocks as usize),
                     data_bitmap: Bitmap::new(
                         (1 + inode_total_blocks) as usize,

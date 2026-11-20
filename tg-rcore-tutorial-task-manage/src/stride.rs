@@ -3,24 +3,28 @@
 const BIG_STRIDE: u128 = 1 << 63;
 const DEFAULT_PRIORITY: usize = 16;
 
-pub(super) struct Stride {
+/// 累计调度服务量与优先级。
+pub struct Stride {
     priority: usize,
     total: u128,
 }
 
 impl Stride {
-    pub(super) const fn new() -> Self {
+    /// 以默认优先级创建新进程的计数。
+    pub const fn new() -> Self {
         Self {
             priority: DEFAULT_PRIORITY,
             total: 0,
         }
     }
 
-    pub(super) fn total(&self) -> u128 {
+    /// 已累计的 stride。
+    pub fn total(&self) -> u128 {
         self.total
     }
 
-    pub(super) fn set_priority(&mut self, priority: isize) -> bool {
+    /// 仅接受不小于 2 的优先级。
+    pub fn set_priority(&mut self, priority: isize) -> bool {
         if priority < 2 {
             return false;
         }
@@ -28,7 +32,8 @@ impl Stride {
         true
     }
 
-    pub(super) fn charge(&mut self) {
+    /// 计入一次调度机会。
+    pub fn charge(&mut self) {
         let step = BIG_STRIDE / self.priority as u128;
         self.total = self
             .total

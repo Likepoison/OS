@@ -70,7 +70,10 @@ impl Manage<Process, ProcId> for ProcManager {
     /// 删除进程
     #[inline]
     fn delete(&mut self, id: ProcId) {
-        self.tasks.remove(&id);
+        if let Some(process) = self.tasks.remove(&id) {
+            // SAFETY: 已切回内核地址空间，退出的进程不会被调度。
+            unsafe { process.address_space.release() };
+        }
     }
 }
 
@@ -81,6 +84,10 @@ impl Schedule<ProcId> for ProcManager {
     }
     /// 从就绪队列头部取出
     fn fetch(&mut self) -> Option<ProcId> {
-        self.ready_queue.pop_front()
+        let (index, _) = self.ready_queue.iter().enumerate()
+            .min_by_key(|(_, pid)| self.tasks[pid].stride.total())?;
+        let pid = self.ready_queue.remove(index).expect("selected ready process");
+        self.tasks.get_mut(&pid).expect("ready process exists").stride.charge();
+        Some(pid)
     }
 }

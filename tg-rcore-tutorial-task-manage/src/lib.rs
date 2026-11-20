@@ -13,6 +13,7 @@ extern crate alloc;
 mod id;
 mod manager;
 mod scheduler;
+pub mod stride;
 
 pub use id::*;
 pub use manager::Manage;
