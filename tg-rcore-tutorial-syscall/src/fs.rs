@@ -45,3 +45,21 @@ impl Stat {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::mem::{offset_of, size_of};
+
+    #[test]
+    fn stat_has_the_layout_used_by_the_kernel_copy() {
+        assert_eq!(size_of::<Stat>(), 80);
+        assert_eq!(offset_of!(Stat, dev), 0);
+        assert_eq!(offset_of!(Stat, ino), 8);
+        assert_eq!(offset_of!(Stat, mode), 16);
+        assert_eq!(offset_of!(Stat, nlink), 20);
+        assert_eq!(offset_of!(Stat, pad), 24);
+        assert_eq!(StatMode::FILE.bits(), 0o100000);
+        assert_eq!(Stat::new().nlink, 0);
+    }
+}

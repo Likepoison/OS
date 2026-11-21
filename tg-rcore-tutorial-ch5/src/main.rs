@@ -31,9 +31,9 @@
 //! - 最后看 `impls::Process`：重点理解 fork/exec/wait 的语义边界。
 
 // 不使用标准库，裸机环境没有操作系统提供系统调用支持
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // 不使用默认的 main 函数入口，裸机环境需要自定义入口点
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 // 在 RISC-V 架构上启用严格的编译警告和文档要求
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 // 在非 RISC-V 架构上允许未使用的代码（用于 IDE 开发体验）
@@ -293,6 +293,7 @@ extern "C" fn rust_main() -> ! {
 }
 
 /// Rust panic 处理函数，打印错误信息并以异常方式关机
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("{info}");
@@ -814,18 +815,21 @@ mod stub {
     }
 
     /// 主机平台占位入口
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn main() -> i32 {
         0
     }
 
     /// libc 启动占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn __libc_start_main() -> i32 {
         0
     }
 
     /// 异常处理占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn rust_eh_personality() {}
 }

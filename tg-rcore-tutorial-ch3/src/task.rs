@@ -175,3 +175,24 @@ impl TaskControlBlock {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trace_counts_itself_and_keeps_task_counters_separate() {
+        let mut first = TaskControlBlock::ZERO;
+        let second = TaskControlBlock::ZERO;
+
+        for expected in [1, 2] {
+            *first.ctx.a_mut(7) = SyscallId::TRACE.0;
+            *first.ctx.a_mut(0) = 2;
+            *first.ctx.a_mut(1) = SyscallId::TRACE.0;
+            assert!(matches!(first.handle_syscall(), SchedulingEvent::None));
+            assert_eq!(first.ctx.a(0), expected);
+        }
+        assert_eq!(second.syscall_counts, [0; TRACKED_SYSCALLS.len()]);
+        assert_eq!(first.trace(2, usize::MAX, 0), 0);
+    }
+}

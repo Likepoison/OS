@@ -18,9 +18,9 @@
 //! - 最后看 `impls::Clock`：理解硬件时钟到用户态时间结构体的桥接。
 
 // 不使用标准库，裸机环境没有操作系统提供系统调用支持
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // 不使用标准入口，裸机环境没有 C runtime 进行初始化
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 // RISC-V64 架构下启用严格警告和文档检查
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 // 非 RISC-V64 架构允许死代码（用于 cargo publish --dry-run 在主机上通过编译）
@@ -199,6 +199,7 @@ extern "C" fn rust_main() -> ! {
 // ========== panic 处理 ==========
 
 /// panic 处理函数：打印错误信息后以异常状态关机。
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("{info}");
@@ -300,18 +301,21 @@ mod impls {
 #[cfg(not(target_arch = "riscv64"))]
 mod stub {
     /// 主机平台占位入口
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn main() -> i32 {
         0
     }
 
     /// C 运行时占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn __libc_start_main() -> i32 {
         0
     }
 
     /// Rust 异常处理人格占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn rust_eh_personality() {}
 }

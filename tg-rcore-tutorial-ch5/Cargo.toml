@@ -1,12 +1,10 @@
 [package]
-name = "tg-rcore-tutorial-ch5"
+name = "likepoison-proj20-ch5"
 description = "Chapter 5 of rCore Tutorial: Process management with fork, exec and wait syscalls."
-version = "0.4.11"
+version = "0.1.0"
 edition = "2024"
 authors = ["YdrMaster <ydrml@hotmail.com>","Yifan Wang<w-yf22@mails.tsinghua.edu.cn>","Yu Chen <yuchen@tsinghua.edu.cn>"]
-repository = "https://github.com/rcore-os/tg-rcore-tutorial-ch5"
-homepage = "https://github.com/rcore-os/tg-rcore-tutorial-ch5/tree/test"
-documentation = "https://docs.rs/tg-rcore-tutorial-ch5"
+repository = "https://github.com/Likepoison/OS"
 license = "GPL-3.0"
 readme = "README.md"
 keywords = ["rcore", "tutorial", "no-std", "riscv", "process"]
@@ -34,12 +32,15 @@ tg-sbi = { package = "tg-rcore-tutorial-sbi", path = "../tg-rcore-tutorial-sbi",
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
 tg-console = { package = "tg-rcore-tutorial-console", path = "../tg-rcore-tutorial-console", version = "0.4.8" }
 tg-kernel-context = { package = "tg-rcore-tutorial-kernel-context", path = "../tg-rcore-tutorial-kernel-context", version = "0.4.8", features = ["foreign"] }
-tg-kernel-alloc = { package = "tg-rcore-tutorial-kernel-alloc", path = "../tg-rcore-tutorial-kernel-alloc", version = "0.4.9" }
-tg-kernel-vm = { package = "tg-rcore-tutorial-kernel-vm", path = "../tg-rcore-tutorial-kernel-vm", version = "0.4.8" }
-tg-syscall = { package = "tg-rcore-tutorial-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.4.8", features = ["kernel"] }
-tg-task-manage = { package = "tg-rcore-tutorial-task-manage", path = "../tg-rcore-tutorial-task-manage", version = "0.4.8", features = ["proc"] }
+tg-kernel-alloc = { package = "likepoison-proj20-kernel-alloc", path = "../tg-rcore-tutorial-kernel-alloc", version = "0.1.0" }
+tg-kernel-vm = { package = "likepoison-proj20-kernel-vm", path = "../tg-rcore-tutorial-kernel-vm", version = "0.1.0" }
+tg-syscall = { package = "likepoison-proj20-syscall", path = "../tg-rcore-tutorial-syscall", version = "0.1.0", features = ["kernel"] }
+tg-task-manage = { package = "likepoison-proj20-task-manage", path = "../tg-rcore-tutorial-task-manage", version = "0.1.0", features = ["proc"] }
 
 [build-dependencies]
 tg-linker = { package = "tg-rcore-tutorial-linker", path = "../tg-rcore-tutorial-linker", version = "0.4.8" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[dev-dependencies]
+tg-kernel-alloc = { package = "likepoison-proj20-kernel-alloc", path = "../tg-rcore-tutorial-kernel-alloc", version = "0.1.0", features = ["host-test"] }

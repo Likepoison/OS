@@ -19,9 +19,9 @@
 //! - 最后看 `impls`：重点掌握 `translate()` 如何保证用户指针访问安全。
 
 // 不使用标准库，裸机环境没有操作系统提供系统调用支持
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // 不使用标准入口，裸机环境没有 C runtime 进行初始化
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 // RISC-V64 架构下启用严格警告和文档检查
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 // 非 RISC-V64 架构允许死代码和未使用导入（用于 cargo publish --dry-run）
@@ -289,6 +289,7 @@ extern "C" fn schedule() -> ! {
 // ========== panic 处理 ==========
 
 /// panic 处理函数：打印错误信息后以异常状态关机。
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     log::error!("{info}");
@@ -365,7 +366,7 @@ mod impls {
     use tg_kernel_vm::sv39::{self, USER_END};
     use tg_console::log;
     use tg_kernel_vm::{
-        page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN, VPN},
+        page_table::{MmuMeta, Pte, VAddr, VmFlags, PPN},
         PageManager,
     };
     use tg_syscall::*;
@@ -414,13 +415,14 @@ mod impls {
         /// 物理页号 → 虚拟地址指针（恒等映射下 PPN == VPN）
         #[inline]
         fn p_to_v<T>(&self, ppn: PPN<Sv39>) -> NonNull<T> {
-            unsafe { NonNull::new_unchecked(VPN::<Sv39>::new(ppn.val()).base().as_mut_ptr()) }
+            let pointer = core::ptr::with_exposed_provenance_mut(ppn.val() << Sv39::PAGE_BITS);
+            NonNull::new(pointer).expect("identity-mapped physical page")
         }
 
         /// 虚拟地址指针 → 物理页号
         #[inline]
         fn v_to_p<T>(&self, ptr: NonNull<T>) -> PPN<Sv39> {
-            PPN::new(VAddr::<Sv39>::new(ptr.as_ptr() as _).floor().val())
+            PPN::new(ptr.as_ptr().expose_provenance() >> Sv39::PAGE_BITS)
         }
 
         /// 检查页表项是否由内核分配
@@ -455,7 +457,10 @@ mod impls {
         }
 
         fn drop_root(&mut self) {
-            todo!()
+            let size = 1 << Sv39::PAGE_BITS;
+            let layout = Layout::from_size_align(size, size).expect("root page layout");
+            // SAFETY: new_root allocated a single page with this layout.
+            unsafe { dealloc(self.0.cast().as_ptr(), layout) };
         }
     }
 
@@ -681,18 +686,21 @@ mod stub {
     }
 
     /// 主机平台占位入口
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn main() -> i32 {
         0
     }
 
     /// C 运行时占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn __libc_start_main() -> i32 {
         0
     }
 
     /// Rust 异常处理人格占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn rust_eh_personality() {}
 }

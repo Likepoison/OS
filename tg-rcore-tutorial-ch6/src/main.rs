@@ -28,9 +28,9 @@
 //! - 最后看 `impls`：理解系统调用如何经由 fd_table 访问文件系统。
 
 // 不使用标准库，裸机环境没有操作系统提供系统调用支持
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // 不使用默认的 main 函数入口，裸机环境需要自定义入口点
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 // 在 RISC-V 架构上启用严格的编译警告和文档要求
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 // 在非 RISC-V 架构上允许未使用的代码（用于 IDE 开发体验）
@@ -252,6 +252,7 @@ extern "C" fn rust_main() -> ! {
 }
 
 /// Rust panic 处理函数，打印错误信息并以异常方式关机
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("{info}");
@@ -470,9 +471,6 @@ mod impls {
         len: Option<usize>,
         name: &'a mut [u8; NAME_LENGTH_LIMIT],
     ) -> Option<&'a str> {
-        if len.is_some_and(|size| size == 0 || size > NAME_LENGTH_LIMIT) {
-            return None;
-        }
         let read = |offset| {
             let addr = start.checked_add(offset)?;
             if addr >= USER_END {
@@ -482,6 +480,17 @@ mod impls {
             // SAFETY: 翻译结果指向经过权限检查的当前进程用户字节。
             Some(unsafe { ptr.as_ptr().read() })
         };
+        read_name(read, len, name)
+    }
+
+    fn read_name(
+        read: impl Fn(usize) -> Option<u8>,
+        len: Option<usize>,
+        name: &mut [u8; NAME_LENGTH_LIMIT],
+    ) -> Option<&str> {
+        if len.is_some_and(|size| size == 0 || size > NAME_LENGTH_LIMIT) {
+            return None;
+        }
         for (index, slot) in name.iter_mut().take(len.unwrap_or(NAME_LENGTH_LIMIT)).enumerate() {
             let byte = read(index)?;
             if byte == 0 {
@@ -497,6 +506,28 @@ mod impls {
             return None;
         }
         core::str::from_utf8(&name[..size]).ok()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn file_name_requires_a_complete_and_valid_user_string() {
+            let mut buffer = [0; NAME_LENGTH_LIMIT];
+            let full = [b'a'; NAME_LENGTH_LIMIT];
+            let read = |index| full.get(index).copied();
+            assert_eq!(
+                read_name(read, Some(full.len()), &mut buffer),
+                core::str::from_utf8(&full).ok(),
+            );
+            assert_eq!(read_name(read, None, &mut buffer), None);
+            let read = |index| b"ok\0".get(index).copied();
+            assert_eq!(read_name(read, None, &mut buffer), Some("ok"));
+            assert_eq!(read_name(read, Some(3), &mut buffer), None);
+            let read = |index| [0xff, 0].get(index).copied();
+            assert_eq!(read_name(read, None, &mut buffer), None);
+        }
     }
 
     fn write_stat(process: &ProcStruct, addr: usize, stat: &Stat) -> bool {
@@ -872,18 +903,21 @@ mod stub {
     }
 
     /// 主机平台占位入口
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn main() -> i32 {
         0
     }
 
     /// libc 启动占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn __libc_start_main() -> i32 {
         0
     }
 
     /// 异常处理占位
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn rust_eh_personality() {}
 }

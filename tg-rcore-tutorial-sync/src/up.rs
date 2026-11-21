@@ -176,3 +176,16 @@ impl<'a, T> DerefMut for UPIntrRefMut<'a, T> {
         self.0.as_mut().unwrap().deref_mut()
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interrupt_masking_starts_with_no_nested_critical_section() {
+        let state = IntrMaskingInfo::new();
+        assert_eq!(state.nested_level, 0);
+        assert!(!state.sie_before_masking);
+    }
+}

@@ -1,4 +1,4 @@
-use tg_task_manage::stride::Stride;
+use likepoison_proj20_task_manage::stride::Stride;
 
 #[test]
 fn priority_changes_the_share_of_dispatches() {

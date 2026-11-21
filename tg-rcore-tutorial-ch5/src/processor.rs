@@ -116,3 +116,48 @@ impl Schedule<ProcId> for ProcManager {
         Some(pid)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tg_kernel_context::{foreign::ForeignContext, LocalContext};
+    use tg_kernel_vm::AddressSpace;
+    use tg_task_manage::stride::Stride;
+
+    #[test]
+    fn fetch_uses_stride_and_preserves_queue_order_on_a_tie() {
+        let mut manager = ProcManager::new();
+        let first = ProcId::new();
+        let second = ProcId::new();
+        for (pid, priority) in [(first, 4), (second, 16)] {
+            let mut stride = Stride::new();
+            assert!(stride.set_priority(priority));
+            manager.insert(
+                pid,
+                Process {
+                    pid,
+                    stride,
+                    context: ForeignContext {
+                        context: LocalContext::empty(),
+                        satp: 0,
+                    },
+                    address_space: AddressSpace::new(),
+                    heap_bottom: 0,
+                    program_brk: 0,
+                },
+            );
+            manager.add(pid);
+        }
+
+        for expected in [first, second, second, second, second, first] {
+            let selected = manager.fetch().unwrap();
+            assert!(selected == expected);
+            manager.add(selected);
+        }
+        assert!(manager.fetch() == Some(second));
+        assert!(manager.fetch() == Some(first));
+        assert!(manager.fetch().is_none());
+        manager.delete(first);
+        manager.delete(second);
+    }
+}

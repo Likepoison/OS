@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use tg_rcore_tutorial_easy_fs::{BLOCK_SZ, BlockDevice, EasyFileSystem};
+use likepoison_proj20_easy_fs::{BLOCK_SZ, BlockDevice, EasyFileSystem};
 
 struct MemoryDisk(Mutex<Vec<[u8; BLOCK_SZ]>>);
 

@@ -10,11 +10,15 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+extern crate std;
+
 use core::{
-    alloc::{GlobalAlloc, Layout},
     cell::UnsafeCell,
     ptr::NonNull,
 };
+#[cfg(any(test, any(target_os = "none", not(feature = "host-test"))))]
+use core::alloc::{GlobalAlloc, Layout};
 use customizable_buddy::{BuddyAllocator, LinkedListBuddy, UsizeBuddy};
 
 /// 静态单元格，用于安全地包装需要内部可变性的静态变量。
@@ -85,7 +89,7 @@ pub unsafe fn transfer(region: &'static mut [u8]) {
     // 将一段“现成内存”并入堆。常用于把启动后可回收区域纳入分配器管理。
     let ptr = NonNull::new(region.as_mut_ptr()).unwrap();
     // SAFETY: 由调用者保证内存块有效且不重叠
-    heap_mut().transfer(ptr, region.len());
+    unsafe { heap_mut().transfer(ptr, region.len()) };
 }
 
 /// 堆分配器。
@@ -110,13 +114,16 @@ fn heap_mut() -> &'static mut BuddyAllocator<21, UsizeBuddy, LinkedListBuddy> {
     unsafe { &mut *HEAP.get() }
 }
 
+#[cfg(any(test, any(target_os = "none", not(feature = "host-test"))))]
 struct Global;
 
+#[cfg(all(not(test), any(target_os = "none", not(feature = "host-test"))))]
 #[global_allocator]
 static GLOBAL: Global = Global;
 
 // SAFETY: GlobalAlloc 的实现必须是 unsafe 的。
 // 此实现仅用于单处理器环境，不支持并发访问。
+#[cfg(any(test, any(target_os = "none", not(feature = "host-test"))))]
 unsafe impl GlobalAlloc for Global {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -132,6 +139,37 @@ unsafe impl GlobalAlloc for Global {
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         // SAFETY: 通过 heap_mut() 访问分配器，在单处理器环境下不会有并发的释放请求。
         // ptr 和 layout 的有效性由调用者保证（必须是之前 alloc 返回的）。
-        heap_mut().deallocate_layout(NonNull::new(ptr).unwrap(), layout)
+        unsafe { heap_mut().deallocate_layout(NonNull::new(ptr).unwrap(), layout) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exhaustion_returns_null_and_freed_block_is_reused() {
+        #[repr(align(4096))]
+        struct Page([u8; 4096]);
+
+        use std::boxed::Box;
+
+        let region = Box::leak(Box::new(Page([0; 4096])));
+        let start = region.0.as_mut_ptr();
+        init(start.expose_provenance());
+        // SAFETY: the leaked page is dedicated to this allocator.
+        unsafe { transfer(&mut region.0) };
+
+        let layout = Layout::from_size_align(4096, 4096).unwrap();
+        // SAFETY: allocations use a valid nonzero layout. Only live results are freed.
+        unsafe {
+            let block = Global.alloc(layout);
+            assert_eq!(block, start);
+            assert!(Global.alloc(layout).is_null());
+            Global.dealloc(block, layout);
+            let reused = Global.alloc(layout);
+            assert_eq!(reused, start);
+            Global.dealloc(reused, layout);
+        }
     }
 }

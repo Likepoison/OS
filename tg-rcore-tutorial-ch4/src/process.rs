@@ -206,3 +206,35 @@ impl Process {
         Some(old_brk)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{PROCESSES, SyscallContext};
+    use tg_syscall::{Caller, Memory};
+
+    #[test]
+    fn unmap_rejects_a_hole_and_preserves_the_existing_page() {
+        const PAGE: usize = 1 << Sv39::PAGE_BITS;
+        let caller = || Caller { entity: 0, flow: 0 };
+        // SAFETY: this is the only test using the static process list.
+        unsafe { PROCESSES.get_mut() }.push(Process {
+            context: ForeignContext {
+                context: LocalContext::empty(),
+                satp: 0,
+            },
+            address_space: AddressSpace::new(),
+            heap_bottom: 0,
+            program_brk: 0,
+            syscall_counts: Box::new([0; TRACKED_SYSCALLS]),
+        });
+
+        assert_eq!(SyscallContext.mmap(caller(), PAGE, PAGE, 3, 0, -1, 0), 0);
+        assert_eq!(SyscallContext.munmap(caller(), PAGE, 2 * PAGE), -1);
+        assert_eq!(SyscallContext.munmap(caller(), PAGE, PAGE), 0);
+        assert_eq!(SyscallContext.munmap(caller(), PAGE, PAGE), -1);
+        // SAFETY: the test owns the process list and never installed this address space.
+        let process = unsafe { PROCESSES.get_mut() }.pop().unwrap();
+        unsafe { process.address_space.release() };
+    }
+}

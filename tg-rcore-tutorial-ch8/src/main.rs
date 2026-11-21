@@ -40,9 +40,9 @@
 //! - 最后看 `impls`：把线程、信号、同步三类系统调用如何交织串起来。
 
 // 不使用标准库
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 // 不使用默认 main 入口
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![cfg_attr(target_arch = "riscv64", deny(warnings, missing_docs))]
 #![cfg_attr(not(target_arch = "riscv64"), allow(dead_code, unused_imports))]
 
@@ -286,6 +286,7 @@ fn exit_thread(processor: &mut ProcessorInner, code: isize) {
 }
 
 /// panic 处理
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("{info}");
@@ -903,10 +904,13 @@ mod stub {
     /// 解析 VmFlags 占位
     pub fn parse_flags(_s: &str) -> Result<VmFlags<Sv39>, ()> { Ok(unsafe { VmFlags::from_raw(0) }) }
 
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn main() -> i32 { 0 }
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn __libc_start_main() -> i32 { 0 }
+    #[cfg(not(test))]
     #[unsafe(no_mangle)]
     pub extern "C" fn rust_eh_personality() {}
 }
