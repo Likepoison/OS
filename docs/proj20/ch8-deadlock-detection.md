@@ -10,7 +10,7 @@
 
 ```bash
 export RUSTUP_TOOLCHAIN=1.100.0
-cargo test --manifest-path tg-rcore-tutorial-ch8/Cargo.toml --target x86_64-unknown-linux-gnu --test test_deadlock
+cargo test --manifest-path tg-rcore-tutorial-ch8/Cargo.toml --target x86_64-unknown-linux-gnu deadlock::tests
 LOG=debug bash scripts/test_proj20.sh ch8
 ```
 
@@ -35,6 +35,12 @@ flowchart LR
 <summary>完成预测后核对</summary>
 
 同一线程继续等待自己持有的唯一锁时，没有其他线程可以归还这个锁，内核返回 `-0xDEAD`。拒绝发生在真正入队之前，因此线程能收到错误并继续执行解锁。信号量有多份资源时，若至少一个线程还能先完成并归还资源，其他线程的请求仍有机会被满足，合法等待应继续执行。
+
+一次实测串口事件如下。线程编号随每次运行而变化。
+
+```text
+sync kind=mutex tid=119 resource=0 decision=reject-deadlock
+```
 
 </details>
 

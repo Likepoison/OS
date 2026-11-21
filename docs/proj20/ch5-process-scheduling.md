@@ -11,7 +11,7 @@ Stride 调度让优先级较高的进程累加更小的步长。调度器每次�
 ```bash
 export RUSTUP_TOOLCHAIN=1.100.0
 export TG_USER_DIR="$(pwd)/tg-rcore-tutorial-user"
-cargo test --manifest-path tg-rcore-tutorial-ch5/Cargo.toml --target x86_64-unknown-linux-gnu --test test_stride
+cargo test --manifest-path tg-rcore-tutorial-task-manage/Cargo.toml --test test_stride
 cd tg-rcore-tutorial-ch5
 timeout -k 5s 180s bash test.sh exercise </dev/null
 ```

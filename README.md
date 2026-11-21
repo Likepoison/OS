@@ -1,4 +1,4 @@
-# TanGram-rCore-Tutorial
+# AI 合作的操作系统课教学实验环境
 
 ## 本仓库的两个参赛项目
 
@@ -7,7 +7,7 @@
 | proj20 | AI 合作的操作系统课教学实验环境。面向 Rust 和操作系统零基础学习者，使用 Rust、RISC-V64、QEMU 和内核串口证据完成实验。 | [proj20](https://github.com/Likepoison/OS/tree/proj20) |
 | proj56 | TraceTutor——操作系统实验评测与智能诊断平台。实验运行、评测、诊断与助教交互。 | [proj56](https://github.com/Likepoison/OS/tree/proj56) |
 
-### proj20 从这里开始
+## proj20 · AI 合作的操作系统课教学实验环境
 
 - [云端复现实验](docs/proj20/cloud-setup.md)
 - [云端工具和实测记录](docs/proj20/cloud-baseline.md)
@@ -19,18 +19,28 @@
 - [ch8 死锁检测练习](docs/proj20/ch8-deadlock-detection.md)
 - [五章实验与验收清单](docs/proj20/acceptance.md)
 - [系统测试、单元测试与打包记录](docs/proj20/verification.md)
-- [学习复盘与对照记录表](docs/proj20/learning-review.md)
+- [学习复盘与 AI 提示](docs/proj20/learning-review.md)
+- [基础练习实现总结](docs/proj20/implementation-summary.md)
+- [教学环境设计总结](docs/proj20/design-summary.md)
+- [赛题参考资料与阅读路径](docs/proj20/references.md)
 
 在云端准备工具后，从仓库根目录运行：
 
 ```bash
 bash scripts/test_proj20.sh ch3
 bash scripts/test_proj20.sh all
+bash scripts/test_proj20_units.sh
 ```
 
-每章依次运行官方基础和练习测试，日志目录由脚本打印。
+系统测试脚本运行官方基础和练习测试，并打印日志目录。单元测试脚本在 Linux 宿主机执行，覆盖五个内核及其发布包中的六个组件。
 
-原参考教程如下。proj20 固定参考提交为 `d6330a6db1f81c8c1cfba5ec3db9923199398f24`，原许可与署名见 [LICENSE](LICENSE) 和各 crate 的清单。
+## proj56 · TraceTutor
+
+TraceTutor 是操作系统实验评测与智能诊断平台。项目代码、README 和运行说明见 [proj56 分支](https://github.com/Likepoison/OS/tree/proj56)。
+
+## 上游教程
+
+下文保留 TanGram-rCore-Tutorial 的说明。proj20 固定参考提交为 `d6330a6db1f81c8c1cfba5ec3db9923199398f24`，原许可与署名见 [LICENSE](LICENSE) 和各 crate 的清单。
 
 
 [![Crates.io](https://img.shields.io/crates/v/tg-rcore-tutorial.svg)](https://crates.io/crates/tg-rcore-tutorial) [![Docs.rs](https://docs.rs/tg-rcore-tutorial/badge.svg)](https://docs.rs/tg-rcore-tutorial) [![License](https://img.shields.io/crates/l/tg-rcore-tutorial.svg)](LICENSE)

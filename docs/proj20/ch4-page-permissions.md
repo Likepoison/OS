@@ -35,6 +35,14 @@ flowchart LR
 
 在租赁服务器实测，`prot=0x1` 建立了只读映射；随后 `trace_read` 返回 `allowed`，`trace_write` 返回 `permission-denied`。执行 `munmap` 后，`trace_read` 返回 `not-user-mapped`。前者有页表项但缺授权，后者已经找不到有效用户映射。
 
+下列事件摘自实测串口日志，保留了事件字段与读取次序。
+
+```text
+vm op=trace_read addr=0x10000000 result=allowed
+vm op=trace_write addr=0x10000000 result=permission-denied
+vm op=trace_read addr=0x10000000 result=not-user-mapped
+```
+
 `trace` 访问的是当前进程里翻译得到的物理位置。两个进程拥有独立页表时，相同虚拟地址可以映射到不同物理页。这也是日志中不能仅凭地址把不同行归给同一个进程的原因。
 
 </details>

@@ -21,6 +21,7 @@ cargo install --locked cargo-binutils --version 0.4.0
 cargo install --path tg-rcore-tutorial-checker
 (cd tg-rcore-tutorial-ch1 && timeout -k 3s 45s cargo run </dev/null)
 bash scripts/test_proj20.sh ch3
+bash scripts/test_proj20_units.sh
 ```
 
 第一章应打印 `Hello, world!` 并正常退出。脚本会打印日志目录，里面包含 Rust/QEMU 版本、Git 提交和两个串口检查日志。五章连跑用 `bash scripts/test_proj20.sh all`。仓库已包含用户态测例，脚本直接使用同一份测例源码。
