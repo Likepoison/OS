@@ -188,6 +188,10 @@ function makeCompanion(activeLab, openResult) {
   let lastVisit;
   let bubbleTimer;
   const voice = setupPetVoice(input, message, () => place(panel));
+  const atlas = new Image();
+  atlas.fetchPriority = "low";
+  atlas.addEventListener("load", () => { avatar.dataset.figure = "ready"; }, {once: true});
+  atlas.src = "/pet/whale-actions.webp";
 
   function updateAppearance() {
     avatar.dataset.mood = mood;

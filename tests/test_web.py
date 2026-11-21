@@ -110,7 +110,7 @@ class Demo(TestCase):
                       image.src = '/pet/whale-actions.webp';
                       await image.decode();
                       return [image.naturalWidth, image.naturalHeight];
-                    }"""), [1792, 1568])
+                    }"""), [1216, 1064])
                     pet_bubble = page.locator("#pet-bubble")
                     self.assertGreater(portrait.bounding_box()["width"], 100)
                     expect(pet).to_have_css("background-color", "rgba(0, 0, 0, 0)")
@@ -183,8 +183,15 @@ class Demo(TestCase):
                     try:
                         mobile.set_viewport_size({"width": 390, "height": 844})
                         mobile.clock.install()
-                        mobile.goto("http://127.0.0.1:8000")
+                        pending_art = []
+                        mobile.route("**/pet/whale-actions.webp", lambda route: pending_art.append(route))
+                        with mobile.expect_request("**/pet/whale-actions.webp"):
+                            mobile.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
                         mobile_pet = mobile.locator("#pet-launch")
+                        expect(mobile_pet.locator(".pet-figure")).to_have_css("background-image", re.compile("whale-stand.webp"))
+                        self.assertTrue(pending_art)
+                        pending_art[0].continue_()
+                        expect(mobile_pet).to_have_attribute("data-figure", "ready")
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
                         self.assertTrue(mobile.locator(".grid > .panel").evaluate_all(

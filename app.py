@@ -23,6 +23,7 @@ PAGE = Path(__file__).with_name("index.html")
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
     "/pet/whale-girl.png": "image/png",
+    "/pet/whale-stand.webp": "image/webp",
     "/pet/whale-actions.webp": "image/webp",
 }
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
@@ -90,13 +91,13 @@ def run_job(run_id, lab, source, want_ai):
 class Handler(BaseHTTPRequestHandler):
     timeout = 15
 
-    def send_data(self, status, payload, content_type="application/json; charset=utf-8"):
+    def send_data(self, status, payload, content_type="application/json; charset=utf-8", *, cache_control="no-store"):
         if not isinstance(payload, bytes):
             payload = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), display-capture=()")
         self.send_header("Content-Security-Policy",
@@ -114,8 +115,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/":
             return self.send_data(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         if url.path in PET_ASSETS:
+            cache = "private, max-age=900" if url.path.endswith(".webp") else "no-store"
             return self.send_data(200, PAGE.with_name("pet").joinpath(Path(url.path).name).read_bytes(),
-                                  PET_ASSETS[url.path])
+                                  PET_ASSETS[url.path], cache_control=cache)
         pet = PET_ROUTE.fullmatch(url.path)
         if pet and not pet[2]:
             lab = parse_qs(url.query).get("lab", [""])[0]
