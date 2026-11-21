@@ -44,6 +44,7 @@ const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本�
 
 function setupPetVoice(input, message, resize) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
+  const autoRead = byId("pet-autoread");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let listener, timeout;
   function note(text = "") {
@@ -66,6 +67,7 @@ function setupPetVoice(input, message, resize) {
   }
   mic.disabled = !Recognition;
   read.disabled = !window.speechSynthesis || !window.SpeechSynthesisUtterance;
+  autoRead.disabled = read.disabled;
   mic.title = Recognition ? "浏览器识别普通话，转写后可确认发送" : "当前浏览器不支持语音输入";
   if (!Recognition) note("当前浏览器可使用文字输入。");
   mic.addEventListener("click", () => {
@@ -110,19 +112,21 @@ function setupPetVoice(input, message, resize) {
       note("无法启动浏览器语音识别，可以继续打字。");
     }
   });
-  read.addEventListener("click", () => {
+  function readReply(automatic = false) {
+    if (read.disabled || (automatic && !autoRead.checked) || !message.textContent) return;
     const reply = new SpeechSynthesisUtterance(message.textContent);
     reply.lang = "zh-CN";
     speechSynthesis.cancel();
     speechSynthesis.speak(reply);
-  });
+  }
+  read.addEventListener("click", () => readReply());
   function stop() {
     if (stopListening()) note();
     if (!read.disabled) speechSynthesis.cancel();
   }
   window.addEventListener("pagehide", stop);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
-  return stop;
+  return {stop, readReply};
 }
 
 function makeStudyMemory() {
@@ -172,23 +176,34 @@ function makeCompanion(activeLab, openResult) {
   const message = byId("pet-reply");
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const input = byId("pet-input");
+  const quickStudy = byId("quick-study"), restore = byId("pet-restore");
+  const motion = byId("pet-motion"), proactive = byId("pet-proactive");
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
+  let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
+  let poseTimer, activityIndex = 0;
+  let lastInteraction = performance.now();
   let view = "grade", visibleEvents, selectedEvent;
   const memory = makeStudyMemory(), memoryStatus = byId("pet-memory-status");
   let lastVisit;
-  let celebration, bubbleTimer;
-  const stopVoice = setupPetVoice(input, message, () => place(panel));
+  let bubbleTimer;
+  const voice = setupPetVoice(input, message, () => place(panel));
 
   function updateAppearance() {
     avatar.dataset.mood = mood;
     avatar.classList.toggle("dragging", Boolean(drag?.active));
+    const pose = drag?.active ? "drag" : mood === "working" || mood === "review" ? "focus" : "stand";
+    setPose(pose);
+  }
+
+  function setPose(pose, duration = 0) {
+    clearTimeout(poseTimer);
+    avatar.dataset.pose = pose;
+    if (duration) poseTimer = setTimeout(updateAppearance, duration);
   }
 
   function celebrate() {
-    if (avatar.hidden) return;
-    clearTimeout(celebration);
-    avatar.classList.add("cheering");
-    celebration = setTimeout(() => { avatar.classList.remove("cheering"); }, 480);
+    if (!avatar.hidden && motion.checked && !reducedMotion.matches) setPose("play", 1050);
   }
 
   function speak(text) {
@@ -203,12 +218,14 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function announce() {
-    if (avatar.hidden || !panel.hidden) return;
+    if (!proactive.checked || document.hidden || avatar.hidden || !panel.hidden || byId("appearance").open || byId("editor-settings").open) return;
+    lastInteraction = performance.now();
+    stopRoaming();
     hideBubble();
     bubble.hidden = false;
     bubble.textContent = message.textContent;
     place(bubble);
-    bubbleTimer = setTimeout(hideBubble, 5300);
+    bubbleTimer = setTimeout(hideBubble, 6200);
   }
 
   function place(floating) {
@@ -234,14 +251,70 @@ function makeCompanion(activeLab, openResult) {
     };
     avatar.style.left = position.x + "px";
     avatar.style.top = position.y + "px";
-    avatar.style.right = "auto";
-    avatar.style.bottom = "auto";
     reset.hidden = false;
     place(panel);
     place(bubble);
   }
 
+  function stopRoaming() {
+    if (avatar.dataset.roaming !== "true") return;
+    const {left, top} = avatar.getBoundingClientRect();
+    clearTimeout(roamTimeout);
+    delete avatar.dataset.roaming;
+    move(left, top);
+    updateAppearance();
+  }
+
+  function goHome() {
+    stopRoaming();
+    position = undefined;
+    manuallyPlaced = roamingLeft = false;
+    avatar.dataset.facing = "left";
+    for (const side of ["left", "top"]) avatar.style.removeProperty(side);
+    reset.hidden = true;
+    place(panel);
+    place(bubble);
+  }
+
+  function patrol() {
+    if (document.hidden || avatar.hidden || !panel.hidden || drag ||
+      byId("appearance").open || byId("editor-settings").open) return;
+    const idle = performance.now() - lastInteraction;
+    if (proactive.checked && idle > 52000 && mood !== "working") {
+      const lab = activeLab();
+      if (lab) {
+        speak(mood === "success" ? "做道概念小测，把刚通过的实验再想一遍吧。"
+          : mood === "review" ? "还在排查吗？可以先比较失败用例的输出，再到轨迹找对应事件。"
+          : "如果不确定从哪儿入手，可以先跑一个样例，然后问我怎么看结果。");
+        announce();
+      }
+      return;
+    }
+    if (!motion.checked || reducedMotion.matches || !bubble.hidden ||
+        avatar.matches(":hover, :focus") || document.activeElement === source || mood === "working") return;
+    const action = ["walk", "sit", "snack", "play"][activityIndex++ % 4];
+    if (action !== "walk" || manuallyPlaced) {
+      setPose(action === "walk" ? "sit" : action, {walk: 4000, sit: 4800, snack: 2150, play: 1050}[action]);
+      return;
+    }
+    const style = getComputedStyle(avatar);
+    const homeX = innerWidth - avatar.offsetWidth - parseFloat(style.getPropertyValue("--pet-edge"));
+    const homeY = innerHeight - avatar.offsetHeight - parseFloat(style.getPropertyValue("--pet-bottom"));
+    roamingLeft = !roamingLeft;
+    avatar.dataset.facing = roamingLeft ? "left" : "right";
+    avatar.dataset.roaming = "true";
+    setPose("walk", 1900);
+    move(homeX - (roamingLeft ? Math.min(330, innerWidth * .26) : 0), homeY);
+    roamTimeout = setTimeout(() => { delete avatar.dataset.roaming; }, 1900);
+  }
+  function startPatrol() {
+    clearInterval(patrolTimer);
+    patrolTimer = setInterval(patrol, 11000);
+  }
+
   function setOpen(open, focus = true) {
+    stopRoaming();
+    updateAppearance();
     panel.hidden = !open;
     avatar.setAttribute("aria-expanded", String(open));
     if (open) {
@@ -249,8 +322,8 @@ function makeCompanion(activeLab, openResult) {
       place(panel);
       if (focus) byId("pet-title").focus();
     } else {
-      stopVoice();
-      if (focus) avatar.focus();
+      voice.stop();
+      if (focus && !avatar.hidden) avatar.focus();
     }
   }
 
@@ -354,7 +427,8 @@ function makeCompanion(activeLab, openResult) {
     remember({type: "event", ...event});
     if (avatar.hidden) {
       avatar.hidden = false;
-      byId("pet-restore").hidden = true;
+      restore.hidden = true;
+      quickStudy.hidden = false;
     }
     setOpen(true);
     explainSelected();
@@ -428,7 +502,6 @@ function makeCompanion(activeLab, openResult) {
     } else if (run?.passed) {
       mood = "success";
       speak("全部用例通过啦！要不要用一道概念题复习刚才的操作？");
-      celebrate();
     } else if (run?.hasResult) {
       mood = "review";
       speak(run.confidence === "insufficient"
@@ -442,13 +515,20 @@ function makeCompanion(activeLab, openResult) {
     }
     updateAppearance();
     announce();
+    if (mood === "success") celebrate();
   }
 
   avatar.addEventListener("pointerdown", event => {
     if (!event.isPrimary || event.button !== 0) return;
+    stopRoaming();
     const {left, top} = avatar.getBoundingClientRect();
     moved = false;
     drag = {id: event.pointerId, x: event.clientX, y: event.clientY, left, top, active: false};
+  });
+  avatar.addEventListener("pointerenter", () => {
+    if (!drag && panel.hidden && motion.checked && !reducedMotion.matches && !avatar.dataset.roaming) {
+      celebrate();
+    }
   });
   window.addEventListener("pointermove", event => {
     if (!drag || drag.id !== event.pointerId) return;
@@ -456,6 +536,7 @@ function makeCompanion(activeLab, openResult) {
     if (!drag.active && Math.hypot(dx, dy) < 6) return;
     if (!drag.active) {
       drag.active = moved = true;
+      manuallyPlaced = true;
       avatar.setPointerCapture(event.pointerId);
       updateAppearance();
     }
@@ -477,58 +558,82 @@ function makeCompanion(activeLab, openResult) {
     const direction = {ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0]}[event.key];
     if (!direction) return;
     event.preventDefault();
+    stopRoaming();
+    manuallyPlaced = true;
     const {left, top} = avatar.getBoundingClientRect();
     const distance = event.shiftKey ? 48 : 16;
     move(left + direction[0] * distance, top + direction[1] * distance);
   });
   window.addEventListener("resize", () => {
-    if (position) move(position.x, position.y);
-    else {
-      place(panel);
-      place(bubble);
-    }
+    stopRoaming();
+    if (manuallyPlaced && position) move(position.x, position.y);
+    else goHome();
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && !panel.hidden) setOpen(false);
+    lastInteraction = performance.now();
+    if (event.key === "Escape" && !panel.hidden && !byId("appearance").open && !byId("editor-settings").open) setOpen(false);
+  });
+  document.addEventListener("pointerdown", () => { lastInteraction = performance.now(); }, {passive: true});
+  motion.addEventListener("change", () => {
+    avatar.dataset.motion = String(motion.checked);
+    if (!motion.checked) {
+      if (!manuallyPlaced) goHome();
+      updateAppearance();
+    }
+  });
+  proactive.addEventListener("change", () => {
+    if (!proactive.checked) hideBubble();
+  });
+  reducedMotion.addEventListener("change", () => {
+    if (reducedMotion.matches && !manuallyPlaced) goHome();
+  });
+  quickStudy.addEventListener("click", event => {
+    const action = event.target.closest("[data-study]")?.dataset.study;
+    if (!action) return;
+    setOpen(true);
+    if (action === "chat") input.focus();
+    else if (action === "quiz") showQuiz();
+    else reportProgress();
   });
   byId("pet-close").addEventListener("click", () => setOpen(false));
-  const restore = byId("pet-restore");
   byId("pet-hide").addEventListener("click", () => {
     setOpen(false, false);
     hideBubble();
     avatar.hidden = true;
     restore.hidden = false;
-    clearTimeout(celebration);
-    avatar.classList.remove("cheering");
+    quickStudy.hidden = true;
+    updateAppearance();
     restore.focus();
   });
   restore.addEventListener("click", () => {
     restore.hidden = true;
     avatar.hidden = false;
+    quickStudy.hidden = false;
     announce();
     avatar.focus();
   });
   reset.addEventListener("click", () => {
-    position = undefined;
-    for (const side of ["left", "top", "right", "bottom"]) avatar.style.removeProperty(side);
-    reset.hidden = true;
-    place(panel);
+    goHome();
     byId("pet-close").focus();
   });
   byId("pet-form").addEventListener("submit", async event => {
     event.preventDefault();
     const text = input.value.trim();
     input.value = "";
-    activeRun = undefined;
-    lastUpdate = undefined;
     if (!text) return;
     const reply = await respond(text);
+    if (!panel.hidden) voice.readReply(true);
     remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(text)});
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {
+    clearInterval(patrolTimer);
+    stopRoaming();
+    clearTimeout(poseTimer);
     memory.close();
     lastVisit = undefined;
+    activeRun = undefined;
+    lastUpdate = undefined;
     input.value = "";
     selectedEvent = undefined;
     visibleEvents = undefined;
@@ -537,6 +642,13 @@ function makeCompanion(activeLab, openResult) {
     quiz.hidden = true;
     hideBubble();
   });
+  window.addEventListener("pageshow", event => {
+    if (event.persisted) {
+      lastInteraction = performance.now();
+      startPatrol();
+    }
+  });
+  startPatrol();
   return {update, observe, explain, recordRun};
 }
 

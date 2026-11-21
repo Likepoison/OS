@@ -46,6 +46,9 @@ class Demo(TestCase):
                           stop() {}
                           abort() { this.cancelled = true; }
                         };
+                        window.speechSynthesis.speak = utterance => {
+                          window.lastSpokenReply = utterance.text;
+                        };
                     """)
                     errors = []
                     page.on("pageerror", lambda error: errors.append(str(error)))
@@ -66,18 +69,54 @@ class Demo(TestCase):
                     expect(page.locator(".brand")).to_contain_text("TraceTutor")
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
+                    self.assertEqual(page.locator(".grid > .panel").evaluate_all(
+                        "(nodes) => new Set(nodes.map(n => n.getBoundingClientRect().bottom)).size"), 1)
+                    self.assertTrue(page.locator("#quote-source").get_attribute("href").startswith("https://"))
+                    page.get_by_role("button", name="外观设置").click()
+                    appearance = page.get_by_role("dialog", name="外观设置")
+                    appearance.get_by_label("界面主题").select_option("sage")
+                    appearance.get_by_label("背景图案").select_option("waves")
+                    expect(page.locator("html")).to_have_attribute("data-theme", "sage")
+                    expect(page.locator("body")).to_have_attribute("data-backdrop", "waves")
+                    appearance.get_by_label("自定义背景图片").set_input_files({
+                        "name": "invalid.png", "mimeType": "image/png", "buffer": b"invalid",
+                    })
+                    expect(appearance.locator("#background-note")).to_contain_text("图片无法打开")
+                    appearance.get_by_label("自定义背景图片").set_input_files("pet/whale-girl.png")
+                    expect(page.locator("body")).to_have_attribute("data-backdrop", "custom")
+                    appearance.get_by_label("背景图案").select_option("grid")
+                    appearance.get_by_label("界面主题").select_option("blue")
+                    appearance.get_by_role("button", name="完成").click()
+                    code = page.get_by_role("textbox", name="C 源代码")
+                    original_code = code.input_value()
+                    page.get_by_role("button", name="代码样式").click()
+                    options = page.get_by_role("dialog", name="代码样式")
+                    options.get_by_label("字号").select_option("17")
+                    options.get_by_label("制表符宽度").select_option("2")
+                    options.get_by_label("自动换行").check()
+                    expect(code).to_have_css("font-size", "17px")
+                    expect(code).to_have_css("tab-size", "2")
+                    expect(code).to_have_attribute("wrap", "soft")
+                    expect(code).to_have_value(original_code)
+                    options.get_by_label("自动换行").uncheck()
+                    options.get_by_role("button", name="完成").click()
                     pet = page.get_by_role("button", name="鲸鱼娘助教")
                     pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
                     pet_reply = pet_panel.locator("#pet-reply")
-                    portrait = pet.locator("img")
-                    expect(portrait).to_have_attribute("src", "/pet/whale-girl.png")
-                    self.assertEqual(portrait.evaluate("(img) => img.naturalWidth"), 144)
+                    portrait = pet.locator(".pet-figure")
+                    expect(portrait).to_have_css("background-image", re.compile("whale-actions.webp"))
+                    self.assertEqual(page.evaluate("""async () => {
+                      const image = new Image();
+                      image.src = '/pet/whale-actions.webp';
+                      await image.decode();
+                      return [image.naturalWidth, image.naturalHeight];
+                    }"""), [1792, 1568])
                     pet_bubble = page.locator("#pet-bubble")
-                    expect(pet_bubble).to_be_visible()
-                    expect(pet_bubble).to_contain_text("我是鲸鱼娘助教")
+                    self.assertGreater(portrait.bounding_box()["width"], 100)
+                    expect(pet).to_have_css("background-color", "rgba(0, 0, 0, 0)")
                     page.emulate_media(reduced_motion="no-preference")
                     pet.hover()
-                    expect(portrait).to_have_css("transform", re.compile(r"^matrix\("))
+                    expect(pet).to_have_attribute("data-pose", "play")
                     original = pet.bounding_box()
                     page.mouse.down()
                     page.mouse.move(original["x"] - 70, original["y"] - 60, steps=5)
@@ -104,8 +143,10 @@ class Demo(TestCase):
                     })""")
                     expect(prompt).to_have_value("我的学习进度怎样")
                     expect(pet_reply).to_contain_text("答对啦")
+                    pet_panel.get_by_label("自动朗读").check()
                     prompt.press("Enter")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
+                    self.assertIn("概念题答对 1/2 次", page.evaluate("window.lastSpokenReply"))
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
                     expect(pet_panel.locator("#pet-voice-status")).to_contain_text("可以继续打字")
@@ -138,6 +179,36 @@ class Demo(TestCase):
                     page.keyboard.press("Escape")
                     expect(pet_panel).to_be_hidden()
                     expect(pet).to_be_focused()
+                    mobile = context.new_page()
+                    try:
+                        mobile.set_viewport_size({"width": 390, "height": 844})
+                        mobile.clock.install()
+                        mobile.goto("http://127.0.0.1:8000")
+                        mobile_pet = mobile.locator("#pet-launch")
+                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
+                        self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
+                        self.assertTrue(mobile.locator(".grid > .panel").evaluate_all(
+                            "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
+                        mobile.mouse.move(20, 120)
+                        home = mobile_pet.bounding_box()["x"]
+                        mobile.clock.run_for(12000)
+                        expect(mobile_pet).to_have_attribute("data-roaming", "true")
+                        self.assertLess(float(mobile_pet.evaluate("(el) => parseFloat(el.style.left)")), home - 40)
+                        mobile.clock.run_for(10000)
+                        expect(mobile_pet).to_have_attribute("data-pose", "sit")
+                        mobile.clock.run_for(11000)
+                        expect(mobile_pet).to_have_attribute("data-pose", "snack")
+                        mobile.clock.run_for(11000)
+                        expect(mobile_pet).to_have_attribute("data-pose", "play")
+                        mobile.get_by_role("button", name="外观设置").click()
+                        mobile.get_by_label("桌宠自由活动").uncheck()
+                        mobile.get_by_label("桌宠主动气泡").uncheck()
+                        mobile.get_by_role("button", name="完成").click()
+                        mobile.clock.fast_forward(65000)
+                        expect(mobile_pet).to_have_attribute("data-motion", "false")
+                        expect(mobile.locator("#pet-bubble")).to_be_hidden()
+                    finally:
+                        mobile.close()
                     if out := os.getenv("TRACE_SCREENSHOTS"):
                         Path(out).mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=f"{out}/workspace.png", full_page=True)
@@ -152,11 +223,12 @@ class Demo(TestCase):
                     page.route("**/api/runs", lambda route: held.append(route))
                     with page.expect_response(lambda response: is_submission(response.request)) as submitted:
                         with page.expect_request(is_submission):
-                            run.click()
+                            code.press("Control+Enter")
                         page.get_by_role("button", name="正确样例").click()
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
-                        expect(portrait).to_have_css("animation-name", "pet-work")
+                        expect(pet).to_have_attribute("data-pose", "focus")
+                        expect(portrait).to_have_css("animation-name", "pet-frames")
                         expect(pet_bubble).to_be_visible()
                         held[0].continue_()
                     page.unroute("**/api/runs")

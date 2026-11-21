@@ -23,11 +23,13 @@ python app.py
 
 在 **Ports** 中打开 8000 端口的私有预览。建议运行「进程与管道」故障样例，查看关联事件和分层提示，再切换正确样例重跑。在实验记录点击「对比最近两次」，逐用例核对变化，并从对比页直接打开相关轨迹。证据不足时可以跳到轨迹末页继续排查。演示结束后停止 Codespace。
 
-「鲸鱼娘助教」随网页出现，在打开页面、评测进行中、评测通过或需要排查时自动显示气泡。点击桌宠可问排查方向、打开本次分层提示，或做一道与当前实验相关的概念题。将鼠标划过可看到动作，拖动或用方向键可以调整位置，按 Esc 收起面板。选择「隐藏桌宠」可关闭头像和气泡，从页头「显示助教」恢复。关闭网页即结束互动。
+「外观设置」可独立切换主题、背景和桌宠活动，可选一张图片在当前页面预览。「代码样式」可调整等宽字体、字号、制表符宽度、换行和底色。编辑器内按 Ctrl + Enter 可运行实验。工作台顶部可直接打开助教、概念小测或学习进度。
+
+「鲸鱼娘助教」随网页出现。空闲时会沿页面底部散步、坐下、吃饼干和自己玩，随评测进展主动提示。将鼠标划过会触发动作，拖动或用方向键可移动她，按 Esc 收起面板。「外观设置」可以单独关闭桌宠活动和主动气泡。选择「隐藏桌宠」可从页面收起角色，从页头「显示助教」恢复。
 
 切换到系统调用、分层提示或实验记录时，助教会根据当前页面给出导览。点击某条轨迹的「问助教」，可追问该调用与已观察到的返回状态。「学习进度」按实验汇总本页会话内的评测和小测。「本轮回顾」串起这次看过的轨迹和问答。助教记忆暂存于 Codespace 服务进程内存，每个网页独立。关闭或重载页面会请求删除会话。意外断线后，闲置约 10 分钟会回收。实验记录由评测系统单独保留。
 
-可以打字，或在支持语音输入的浏览器上点击「语音输入」，确认转写文字后发送。朗读和语音输入由浏览器提供，语音识别可能使用浏览器服务。桌宠只接收当前页的结构化实验信息和已发送的提问。问答使用预设教学话术。浏览器不写入持久存储，服务不把桌宠记忆写入 Git 或实验数据库。已有 DeepSeek 分层反馈时，桌宠会提供相应入口。
+可以打字，或在支持语音输入的浏览器上点击「语音输入」，确认转写文字后发送。也可以勾选「自动朗读」，听到对话回复。朗读和语音输入由浏览器提供，语音识别可能使用浏览器服务。桌宠只接收当前页的结构化实验信息和已发送的提问。问答使用预设教学话术。浏览器不写入持久存储，服务不把桌宠记忆写入 Git 或实验数据库。已有 DeepSeek 分层反馈时，桌宠会提供相应入口。
 
 如果网页 IDE 连接缓慢，在 [Your Codespaces](https://github.com/codespaces) 选择同一个 Codespace，使用 **Open in → Visual Studio Code**。桌面 VS Code 需安装 GitHub Codespaces 扩展并登录，终端依然运行在远端。
 
@@ -63,4 +65,4 @@ python3 app.py
 - [Docker 资源约束](https://docs.docker.com/engine/containers/resource_constraints/)用于配置和实测 CPU、内存、交换空间及进程数上限。
 - [strace 手册](https://man7.org/linux/man-pages/man1/strace.1.html)与 [ptrace 手册](https://man7.org/linux/man-pages/man2/ptrace.2.html)用于跟踪进程树、解码描述符并判定采集和权限边界。
 - 题目提供的 [Go](https://go.dev/doc/)、[PostgreSQL](https://www.postgresql.org/docs/current/installation.html)、[MinIO](https://docs.min.io/aistor/installation/linux/install/) 是参考选项。按需演示使用 Python 和 SQLite。
-- 桌宠的气泡和按需语音交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion)，独立运行和状态动作参考 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)。TraceTutor 直接在实验页运行这些交互。头像原样使用 [Coopanion v0.1.10 内置 DeepSeek Chan 预览素材](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)，随附[当时的 MIT 许可](pet/LICENSE-Coopanion.txt)。按[同版本素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。
+- 桌宠交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion) 和 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop) 的活动方式。站立、坐下、移动等全身帧来自 [Coopanion v0.1.10 的 DeepSeek 模型](https://github.com/Pal-AI-Lab/Coopanion/tree/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale)，经透明裁剪、动作编排和 WebP 压缩，添加了饼干与玩耍特效。网页图标使用同版 [DeepSeek 预览图](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)。附[同版 MIT 许可](pet/LICENSE-Coopanion.txt)与[上游素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)。署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。

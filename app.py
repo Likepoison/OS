@@ -23,6 +23,7 @@ PAGE = Path(__file__).with_name("index.html")
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
     "/pet/whale-girl.png": "image/png",
+    "/pet/whale-actions.webp": "image/webp",
 }
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
 MAX_SOURCE = 32_768
