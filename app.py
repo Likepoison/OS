@@ -30,9 +30,9 @@ if (VOICE_CACHE / "python").is_dir():
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
     "/pet/whale-girl.png": "image/png",
-    "/pet/whale-stand.webp": "image/webp",
-    "/pet/whale-greeting.webp": "image/webp",
-    "/pet/whale-actions.webp": "image/webp",
+    **{f"/pet/whale-{pose}.webp": "image/webp" for pose in (
+        "stand", "greet", "walk", "listen", "talk", "sit", "snack", "play", "look", "sleep", "focus", "drag"
+    )},
 }
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
 MAX_SOURCE = 32_768

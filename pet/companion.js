@@ -360,11 +360,8 @@ function makeCompanion(activeLab, openResult) {
   const motion = byId("pet-motion"), proactive = byId("pet-proactive");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const greeting = bubble.textContent;
-  const corePoses = new Set(["stand", "greet", "walk", "listen", "talk"]);
-  const sheets = {
-    greeting: {path: "/pet/whale-greeting.webp", attempts: 0},
-    actions: {path: "/pet/whale-actions.webp?v=2", attempts: 0}
-  };
+  const readyArtwork = new Set(), artworkFailures = new Map();
+  let loadingArtwork;
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
   let poseTimer, voicePose, greeted = false, pendingBubble, activityIndex = 0, hoverIndex = 0;
@@ -376,32 +373,41 @@ function makeCompanion(activeLab, openResult) {
   let bubbleTimer;
   const voice = setupPetVoice(input, message, () => place(panel), pose => {
     voicePose = pose;
+    if (voicePose && voicePose !== "talk") cancelArtwork();
     updateAppearance();
   });
 
-  function applySheet() {
-    const name = corePoses.has(avatar.dataset.pose) ? "greeting" : "actions";
-    if (sheets[name].ready) avatar.dataset.sheet = name;
-    else {
-      delete avatar.dataset.sheet;
-      loadSheet(name);
-    }
+  function cancelArtwork() {
+    if (!loadingArtwork) return;
+    loadingArtwork.onload = loadingArtwork.onerror = null;
+    loadingArtwork.removeAttribute("src");
+    loadingArtwork = undefined;
   }
 
-  function loadSheet(name) {
-    const sheet = sheets[name];
-    if (sheet.ready || sheet.loading || sheet.attempts >= 2) return;
-    const image = new Image();
-    sheet.loading = true;
-    sheet.attempts++;
+  function showArtwork() {
+    const pose = avatar.dataset.pose;
+    const path = "/pet/whale-" + pose + ".webp";
+    if (readyArtwork.has(pose)) {
+      avatar.style.setProperty("--frames", 'url("' + path + '")');
+      avatar.dataset.art = pose;
+      return;
+    }
+    delete avatar.dataset.art;
+    avatar.style.removeProperty("--frames");
+    if (pose === "stand" || (voicePose && voicePose !== "talk") || loadingArtwork || avatar.hidden || document.hidden ||
+        !motion.checked || reducedMotion.matches || (artworkFailures.get(pose) || 0) >= 2) return;
+    const image = loadingArtwork = new Image();
     image.fetchPriority = "low";
     image.onload = () => {
-      sheet.ready = true;
-      sheet.loading = false;
-      applySheet();
+      readyArtwork.add(pose);
+      loadingArtwork = undefined;
+      showArtwork();
     };
-    image.onerror = () => { sheet.loading = false; };
-    image.src = sheet.path;
+    image.onerror = () => {
+      artworkFailures.set(pose, (artworkFailures.get(pose) || 0) + 1);
+      loadingArtwork = undefined;
+    };
+    image.src = path;
   }
 
   function updateAppearance() {
@@ -415,7 +421,7 @@ function makeCompanion(activeLab, openResult) {
     clearTimeout(poseTimer);
     if (pose !== "look") clearHoverGaze();
     avatar.dataset.pose = pose;
-    applySheet();
+    showArtwork();
     if (duration) poseTimer = setTimeout(updateAppearance, duration);
   }
 
@@ -841,6 +847,7 @@ function makeCompanion(activeLab, openResult) {
   motion.addEventListener("change", () => {
     avatar.dataset.motion = String(motion.checked);
     if (!motion.checked) {
+      cancelArtwork();
       if (!manuallyPlaced) goHome();
       updateAppearance();
     }
@@ -866,6 +873,7 @@ function makeCompanion(activeLab, openResult) {
     setOpen(false, false);
     hideBubble();
     avatar.hidden = true;
+    cancelArtwork();
     restore.hidden = false;
     quickStudy.hidden = true;
     updateAppearance();
@@ -895,6 +903,7 @@ function makeCompanion(activeLab, openResult) {
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {
     clearInterval(patrolTimer);
+    cancelArtwork();
     stopRoaming();
     clearTimeout(poseTimer);
     memory.close();
@@ -920,6 +929,7 @@ function makeCompanion(activeLab, openResult) {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearInterval(patrolTimer);
+      cancelArtwork();
       stopRoaming();
       hideBubble();
     } else {

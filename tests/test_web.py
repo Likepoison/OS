@@ -129,13 +129,13 @@ class Demo(TestCase):
                     pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
                     pet_reply = pet_panel.locator("#pet-reply")
                     portrait = pet.locator(".pet-figure")
-                    expect(portrait).to_have_css("background-image", re.compile("whale-greeting.webp"))
+                    expect(portrait).to_have_css("background-image", re.compile("whale-stand.webp"))
                     self.assertEqual(page.evaluate("""async () => {
                       const image = new Image();
-                      image.src = '/pet/whale-greeting.webp';
+                      image.src = '/pet/whale-stand.webp?v=2';
                       await image.decode();
                       return [image.naturalWidth, image.naturalHeight];
-                    }"""), [2048, 1280])
+                    }"""), [336, 336])
                     pet_bubble = page.locator("#pet-bubble")
                     self.assertGreater(portrait.bounding_box()["width"], 100)
                     expect(pet).to_have_css("background-color", "rgba(0, 0, 0, 0)")
@@ -233,23 +233,23 @@ class Demo(TestCase):
                         pending_script = []
                         pending_art = []
                         mobile.route("**/pet/companion.js", lambda route: pending_script.append(route))
-                        mobile.route("**/pet/whale-greeting.webp", lambda route: pending_art.append(route))
+                        mobile.route("**/pet/whale-greet.webp", lambda route: pending_art.append(route))
                         with mobile.expect_request("**/pet/companion.js"):
                             mobile.goto("http://127.0.0.1:8000", wait_until="commit")
                         expect(mobile.get_by_role("button", name="语音提问")).to_be_disabled()
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
-                        with mobile.expect_request("**/pet/whale-greeting.webp"):
-                            pending_script[0].continue_()
+                        pending_script[0].continue_()
                         expect(mobile.get_by_role("button", name="问助教")).to_be_enabled()
                         mobile_pet = mobile.locator("#pet-launch")
                         expect(mobile_pet.locator(".pet-figure")).to_have_css("background-image", re.compile("whale-stand.webp"))
-                        self.assertTrue(pending_art)
-                        mobile.evaluate("window.showTraceTab()")
+                        with mobile.expect_request("**/pet/whale-greet.webp"):
+                            mobile.evaluate("window.showTraceTab()")
                         expect(mobile.locator("#pet-bubble")).to_have_attribute("data-kind", "welcome")
                         expect(mobile_pet).to_have_attribute("data-pose", "greet")
                         expect(mobile_pet.locator(".pet-figure")).to_have_css("animation-name", "pet-hello")
+                        self.assertTrue(pending_art)
                         pending_art[0].continue_()
-                        expect(mobile_pet).to_have_attribute("data-sheet", "greeting")
+                        expect(mobile_pet).to_have_attribute("data-art", "greet")
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
                         expect(mobile.locator(".quote-line")).to_have_css("white-space", "nowrap")

@@ -175,42 +175,40 @@ td code { font: 18px var(--mono); }
 .pet-launch.dragging { cursor: grabbing; }
 .pet-launch:disabled { opacity: 1; }
 .pet-figure { display: block; width: 100%; height: 100%; pointer-events: none;
-  --row: 0%; --cycle: 2.6s;
+  --cycle: 2.6s;
   background: url("/pet/whale-stand.webp?v=2") center / contain no-repeat;
   transform-origin: 50% 86%; filter: drop-shadow(0 3px 3px #23365b30); }
-.pet-launch[data-sheet] .pet-figure {
-  background: var(--frames) 0 var(--row) / 800% var(--rows) no-repeat;
+.pet-launch[data-art] .pet-figure {
+  background: var(--frames) 0 0 / 800% 100% no-repeat;
 }
-.pet-launch[data-sheet="greeting"] { --frames: url("/pet/whale-greeting.webp"); --rows: 500%; }
-.pet-launch[data-sheet="actions"] { --frames: url("/pet/whale-actions.webp?v=2"); --rows: 700%; }
 .pet-launch[data-facing="left"] .pet-figure { transform: scaleX(-1); }
-.pet-launch[data-pose="greet"] .pet-figure { --row: 25%; --cycle: 1.4s; }
-.pet-launch[data-pose="walk"] .pet-figure { --row: 50%; --cycle: .68s; }
-.pet-launch[data-pose="listen"] .pet-figure { --row: 75%; --cycle: 1.8s; }
-.pet-launch[data-pose="talk"] .pet-figure { --row: 100%; --cycle: .95s; }
-.pet-launch[data-pose="sit"] .pet-figure { --row: 0%; --cycle: 2.5s; }
-.pet-launch[data-pose="snack"] .pet-figure { --row: 16.666667%; --cycle: 2.1s; }
-.pet-launch[data-pose="play"] .pet-figure { --row: 33.333333%; --cycle: 1.05s; }
-.pet-launch[data-pose="look"] .pet-figure { --row: 50%; --cycle: 2.0s; }
-.pet-launch[data-pose="sleep"] .pet-figure { --row: 66.666667%; --cycle: 3.2s; }
-.pet-launch[data-pose="focus"] .pet-figure { --row: 83.333333%; --cycle: 2.2s; }
-.pet-launch[data-pose="drag"] .pet-figure { --row: 100%; --cycle: .8s; }
+.pet-launch[data-pose="greet"] .pet-figure { --cycle: 1.4s; }
+.pet-launch[data-pose="walk"] .pet-figure { --cycle: .68s; }
+.pet-launch[data-pose="listen"] .pet-figure { --cycle: 1.8s; }
+.pet-launch[data-pose="talk"] .pet-figure { --cycle: .95s; }
+.pet-launch[data-pose="sit"] .pet-figure { --cycle: 2.5s; }
+.pet-launch[data-pose="snack"] .pet-figure { --cycle: 2.1s; }
+.pet-launch[data-pose="play"] .pet-figure { --cycle: 1.05s; }
+.pet-launch[data-pose="look"] .pet-figure { --cycle: 2.0s; }
+.pet-launch[data-pose="sleep"] .pet-figure { --cycle: 3.2s; }
+.pet-launch[data-pose="focus"] .pet-figure { --cycle: 2.2s; }
+.pet-launch[data-pose="drag"] .pet-figure { --cycle: .8s; }
 @media (prefers-reduced-motion: no-preference) {
   .pet-launch[data-roaming="true"] { transition: left 1.85s ease-in-out, top 1.85s ease-in-out; }
-  .pet-launch[data-motion="true"][data-sheet] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
-  .pet-launch[data-motion="true"][data-sheet="actions"][data-gaze="pointer"] .pet-figure {
+  .pet-launch[data-motion="true"][data-art] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
+  .pet-launch[data-motion="true"][data-art="look"][data-gaze="pointer"] .pet-figure {
     animation: none; background-position-x: var(--gaze-frame, 0%);
   }
-  .pet-launch[data-motion="true"]:not([data-sheet])[data-pose="stand"] .pet-figure {
+  .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="stand"], [data-pose="listen"], [data-pose="focus"]) .pet-figure {
     animation: pet-breathe 2.8s ease-in-out infinite;
   }
-  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="greet"], [data-pose="look"], [data-pose="talk"]) .pet-figure {
+  .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="greet"], [data-pose="look"], [data-pose="talk"]) .pet-figure {
     animation: pet-hello 1.4s ease-in-out;
   }
-  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="walk"], [data-pose="play"]) .pet-figure {
+  .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="walk"], [data-pose="play"]) .pet-figure {
     animation: pet-step .55s ease-in-out infinite;
   }
-  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="sit"], [data-pose="sleep"]) .pet-figure {
+  .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="sit"], [data-pose="sleep"]) .pet-figure {
     scale: 1 .94; animation: pet-breathe 3.2s ease-in-out infinite;
   }
   .pet-launch[data-motion="true"][data-pose="snack"] .pet-figure { animation-iteration-count: 1; animation-fill-mode: forwards; }
