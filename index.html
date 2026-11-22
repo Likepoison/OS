@@ -115,6 +115,7 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .status.warn { background: var(--amber-bg); color: var(--amber); }
 .result-nav { padding-inline: 17px; border-bottom: 1px solid var(--line); }
 #contents { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+#contents:has(> .empty) { display: grid; }
 .empty { display: grid; min-height: min(100%, 220px); align-content: center; justify-items: center; text-align: center; gap: 8px; padding: 26px 14px; }
 .empty p, .muted { color: var(--muted); }
 .empty-mark { width: 46px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); color: var(--indigo); font: 20px var(--mono); margin-bottom: 5px; }
