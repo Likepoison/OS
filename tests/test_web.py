@@ -219,11 +219,6 @@ class Demo(TestCase):
                                         (req.method == "GET" and "/pet/" in req.url) for req in requests))
                     self.assertEqual(page.evaluate("localStorage.length + sessionStorage.length"), 0)
                     page.remove_listener("request", collect)
-                    stale = "http://127.0.0.1:8000/api/pet/sessions/" + session_ids[-1]
-                    self.assertEqual(page.request.post(stale + "/close").status, 200)
-                    prompt.fill("现在的学习进度")
-                    pet_panel.get_by_role("button", name="发送", exact=True).click()
-                    expect(pet_reply).to_contain_text("概念题答对 0/0 次")
                     pet_panel.get_by_role("button", name="回到角落").click()
                     self.assertEqual(pet.bounding_box()["x"], original["x"])
                     voice.click()
@@ -324,7 +319,8 @@ class Demo(TestCase):
 
                         cloud_voice.route("**/api/labs", voice_configuration)
                         cloud_voice.route("**/api/pet/voice", check_recording)
-                        cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
+                        with cloud_voice.expect_response("**/api/pet/sessions") as session:
+                            cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
                         expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()
                         cloud_voice.keyboard.press("Control+Alt+m")
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
@@ -338,6 +334,13 @@ class Demo(TestCase):
                         expect(cloud_prompt).to_have_value("我的学习进度怎样")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
                         cloud_prompt.press("Enter")
+                        expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
+                        stale = session.value.url + "/" + session.value.json()["id"]
+                        self.assertEqual(cloud_voice.request.post(stale + "/close").status, 200)
+                        cloud_prompt.fill("现在的学习进度")
+                        with cloud_voice.expect_response("**/api/pet/sessions") as renewed:
+                            cloud_voice.get_by_role("button", name="发送", exact=True).click()
+                        self.assertEqual(renewed.value.status, 201)
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
                         invalid = cloud_voice.request.post("http://127.0.0.1:8000/api/pet/voice",
                                                            data=b"\0" * 131073, headers={"Content-Type": "audio/webm"})
