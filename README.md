@@ -29,7 +29,9 @@ python app.py
 
 切换到系统调用、分层提示或实验记录时，助教会根据当前页面给出导览。点击某条轨迹的「问助教」，可追问该调用与已观察到的返回状态。「学习进度」按实验汇总本页会话内的评测和小测。「本轮回顾」串起这次看过的轨迹和问答。助教记忆暂存于 Codespace 服务进程内存，每个网页独立。关闭或重载页面会请求删除会话。意外断线后，闲置约 10 分钟会回收。实验记录由评测系统单独保留。
 
-「语音提问」会打开助教并申请麦克风权限。说完点「结束并转写」，检查文字后发送。浏览器先压缩录音，再由当前 Codespace 中的 [Vosk 普通话模型](https://alphacephei.com/vosk/models) 转写。单次最长 12 秒，录音只在处理期间留在内存。录音需要 HTTPS 或本机回环地址。「朗读回复」和「自动朗读」使用 Codespace 中的 [Piper 小雅普通话女声](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html) 合成鲸鱼娘的声音。
+点「语音提问」或按 `Ctrl + Alt + M` 开始录音。说完再按一次快捷键或点「结束并转写」，确认文字后点击「发送」或在助教输入框按回车。代码编辑器内的回车用于换行。录音最长 12 秒，经浏览器压缩后由 Codespace 中的 [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html) 转写，录音只在处理期间留在内存。录音需要 HTTPS 或本机回环地址。
+
+助教回复默认使用 [Piper 小雅普通话女声](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html) 自动朗读，头顶气泡随播放进度逐字显示。面板内可以关闭「自动朗读」或手动重听。
 
 新建演示环境时，在 Linux 终端执行一次 `bash .devcontainer/setup-voice.sh`，再启动或重启 `python app.py`。两个语音模型保存在被 Git 忽略的运行目录。尚未安装模型时，支持 Web Speech API 的浏览器可以尝试内置识别，音频可能由浏览器提供方处理。桌宠话术基于当前页提供的结构化实验信息和已发送的提问，DeepSeek 分层反馈仍可从实验结果进入。
 

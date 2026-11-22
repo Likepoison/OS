@@ -1,4 +1,5 @@
 """Local, on-demand TraceTutor demo server."""
+from array import array
 from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -45,7 +46,8 @@ WORKERS = ThreadPoolExecutor(max_workers=2)
 SLOTS = BoundedSemaphore(LIMIT)
 PET_MEMORY = StudyMemory()
 PET_ROUTE = re.compile(r"/api/pet/sessions/([a-f0-9]{32})(?:/(close|touch))?")
-VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL", VOICE_CACHE / "vosk-model-small-cn-0.22"))
+VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL",
+                            VOICE_CACHE / "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09"))
 AUDIO_RATE = 16000
 AUDIO_LIMIT = 12 * AUDIO_RATE * 2
 RECORDING_FORMATS = {"audio/webm": "matroska", "audio/ogg": "ogg", "audio/mp4": "mov"}
@@ -56,7 +58,8 @@ logging.basicConfig(level=logging.INFO)
 
 
 def voice_available():
-    return ((VOICE_PATH / "am/final.mdl").is_file() and find_spec("vosk") is not None
+    return ((VOICE_PATH / "model.int8.onnx").is_file() and (VOICE_PATH / "tokens.txt").is_file()
+            and find_spec("sherpa_onnx") is not None
             and find_spec("imageio_ffmpeg") is not None)
 
 
@@ -72,20 +75,21 @@ def decode_recording(content_type, recording):
     return result.stdout
 
 
-def transcribe_voice(audio):
-    from vosk import KaldiRecognizer, Model, SetLogLevel
+def transcribe_voice(samples):
+    from sherpa_onnx import OfflineRecognizer
 
     global voice_model
     if voice_model is None:
-        SetLogLevel(-1)
-        voice_model = Model(str(VOICE_PATH))
-    recognizer = KaldiRecognizer(voice_model, AUDIO_RATE)
-    parts = []
-    for start in range(0, len(audio), 4096):
-        if recognizer.AcceptWaveform(audio[start:start + 4096]):
-            parts.append(json.loads(recognizer.Result())["text"])
-    parts.append(json.loads(recognizer.FinalResult())["text"])
-    return re.sub(r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])", "", " ".join(parts)).strip()[:100]
+        voice_model = OfflineRecognizer.from_sense_voice(
+            model=str(VOICE_PATH / "model.int8.onnx"), tokens=str(VOICE_PATH / "tokens.txt"),
+            num_threads=2, language="zh", use_itn=True,
+        )
+    stream = voice_model.create_stream()
+    # Give isolated clips room around the first and last syllables.
+    waveform = [0.0] * 6400 + [sample / 32768 for sample in samples] + [0.0] * 3200
+    stream.accept_waveform(AUDIO_RATE, waveform)
+    voice_model.decode_stream(stream)
+    return stream.result.text.strip()[:100]
 
 
 @contextmanager
@@ -284,8 +288,13 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_data(503, {"error": "录音解码服务暂不可用。"})
                 if len(audio) < AUDIO_RATE // 2:
                     return self.send_data(400, {"error": "录音太短，请说完后再结束。"})
+            samples = array("h", audio)
+            if sys.byteorder != "little":
+                samples.byteswap()
+            if not any(abs(sample) >= 64 for sample in samples):
+                return self.send_data(200, {"text": "", "reason": "no_signal"})
             try:
-                transcript = transcribe_voice(audio)
+                transcript = transcribe_voice(samples)
             except Exception:
                 logging.exception("Voice recognition failed")
                 return self.send_data(503, {"error": "普通话识别暂时失败，请重试或使用文字。"})

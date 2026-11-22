@@ -42,7 +42,7 @@ const callClues = {
 const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
 const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本轮小结/;
 
-function setupPetVoice(input, message, resize, setVoicePose) {
+function setupPetVoice(input, message, resize, setVoicePose, caption) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -86,21 +86,20 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     }
     useServer = configuration.record && canRecord;
     mic.disabled = !useServer && !Recognition;
-    mic.title = useServer ? "说完后点击结束，普通话在当前演示服务内转写"
-      : Recognition ? "使用浏览器语音识别，转写后可确认发送" : "当前浏览器无法使用语音输入";
+    mic.title = useServer ? "语音输入 · Ctrl + Alt + M。普通话在当前演示服务内转写"
+      : Recognition ? "语音输入 · Ctrl + Alt + M。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
     if (mic.disabled) note("当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。");
     else note();
   }
 
   function showTranscript(text) {
-    if (!text) return note("没有听清，可以再说一次或直接输入文字。");
+    if (!text) return note("没有识别到话语。请检查浏览器选用的麦克风，靠近后说完整一句再结束。");
     input.value = text.slice(0, input.maxLength);
     note("已转写。确认文字后发送。");
     input.focus();
   }
 
   function startNative() {
-    if (stopListening()) return note("已取消语音输入。");
     const active = new Recognition();
     listener = active;
     active.lang = "zh-CN";
@@ -110,7 +109,6 @@ function setupPetVoice(input, message, resize, setVoicePose) {
       if (listener !== active) return;
       const text = event.results[event.resultIndex]?.[0]?.transcript.trim();
       clearListener();
-      active.stop();
       showTranscript(text);
     };
     active.onerror = event => {
@@ -189,6 +187,9 @@ function setupPetVoice(input, message, resize, setVoicePose) {
         headers: {"Content-Type": audio.type}, body: audio});
       if (recording !== session) return;
       closeRecording();
+      if (result.reason === "no_signal") {
+        return note("没有收到麦克风声音。请检查浏览器选用的输入设备和系统麦克风音量。");
+      }
       showTranscript(result.text);
     } catch (error) {
       if (recording !== session) return;
@@ -221,7 +222,7 @@ function setupPetVoice(input, message, resize, setVoicePose) {
       recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
-      note("正在听。说完点「结束并转写」，单次最多 12 秒。");
+      note("正在听。说完再按 Ctrl + Alt + M 或点「结束并转写」，最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
       if (recording !== session) return;
@@ -238,16 +239,29 @@ function setupPetVoice(input, message, resize, setVoicePose) {
   mic.addEventListener("click", () => {
     if (recording?.phase === "listening") return finishRecording(recording);
     if (closeRecording()) return note("已取消语音输入。");
+    if (listener) {
+      if (mic.textContent === "停止聆听") {
+        listener.stop();
+        if (listener) micState("取消转写", "focus");
+      } else if (stopListening()) note("已取消语音输入。");
+      return;
+    }
     stopPlayback();
     if (useServer) startServerRecording();
     else startNative();
   });
 
-  function stopPlayback() {
+  function toggleShortcut() {
+    if ((!recording || recording.phase === "listening") && mic.textContent !== "取消转写") mic.click();
+  }
+
+  function stopPlayback(keepCaption = false) {
     if (!playback) return false;
     const current = playback;
     playback = undefined;
     clearTimeout(current.timer);
+    cancelAnimationFrame(current.captionFrame);
+    if (!keepCaption) caption();
     current.request.abort();
     current.audio?.pause();
     if (current.url) URL.revokeObjectURL(current.url);
@@ -261,6 +275,8 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     if (read.disabled || (automatic && !autoRead.checked) || !message.textContent) return;
     if (recording || listener) return;
     if (stopPlayback() && !automatic) return note("已停止朗读。");
+    const text = message.textContent.slice(0, 260);
+    const characters = Array.from(text);
     const request = new AbortController();
     const narration = playback = {request, timer: setTimeout(() => request.abort(), 40000)};
     read.textContent = "停止朗读";
@@ -269,7 +285,7 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     try {
       const response = await fetch("/api/pet/speech", {
         method: "POST", signal: request.signal, headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({text: message.textContent.slice(0, 260)})
+        body: JSON.stringify({text})
       });
       if (response.redirected || !response.ok || !response.headers.get("content-type")?.startsWith("audio/mpeg")) {
         const failure = await response.json().catch(() => null);
@@ -280,12 +296,30 @@ function setupPetVoice(input, message, resize, setVoicePose) {
       clearTimeout(narration.timer);
       narration.url = URL.createObjectURL(clip);
       const audio = narration.audio = new window.Audio(narration.url);
+      let shown = 0;
+      function revealCaption() {
+        if (playback !== narration || audio.paused) return;
+        const count = Number.isFinite(audio.duration) && audio.duration > 0
+          ? Math.min(characters.length, 1 + Math.floor(audio.currentTime / audio.duration * characters.length))
+          : 1;
+        if (count > shown) {
+          shown = count;
+          caption(characters.slice(0, shown).join(""));
+        }
+        if (shown < characters.length) narration.captionFrame = requestAnimationFrame(revealCaption);
+      }
       audio.onplaying = () => {
         if (playback !== narration) return;
         note();
         setVoicePose("talk");
+        cancelAnimationFrame(narration.captionFrame);
+        revealCaption();
       };
-      audio.onended = () => { if (playback === narration) stopPlayback(); };
+      audio.onended = () => {
+        if (playback !== narration) return;
+        stopPlayback(true);
+        caption(text, true);
+      };
       await audio.play();
     } catch (error) {
       if (playback !== narration) return;
@@ -300,12 +334,13 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     const hadRecording = closeRecording();
     if (stopListening() || hadRecording) note();
     if (stopPlayback()) note();
+    caption();
     setVoicePose(null);
   }
   window.addEventListener("pagehide", stop);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
   enableServer();
-  return {stop, readReply, enableServer};
+  return {stop, readReply, enableServer, toggleShortcut};
 }
 
 function makeStudyMemory() {
@@ -319,10 +354,13 @@ function makeStudyMemory() {
   }
   function request(action) {
     const version = generation;
-    const next = queue.then(async () => {
+    const signal = AbortSignal.timeout(8000);
+    const scopedApi = (url, options) => api(url, {...options, signal});
+    async function withSession() {
       if (version !== generation) return null;
+      signal.throwIfAborted();
       if (!path) {
-        const {id} = await api(collection, {method: "POST", headers: json});
+        const {id} = await scopedApi(collection, {method: "POST", headers: json});
         const started = collection + "/" + id;
         if (version !== generation) {
           closePath(started);
@@ -330,15 +368,23 @@ function makeStudyMemory() {
         }
         path = started;
       }
-      return action(path);
+      return action(path, scopedApi);
+    }
+    const next = queue.then(withSession).catch(error => {
+      if (error.status !== 404 || !path || version !== generation) throw error;
+      path = undefined;
+      return withSession();
+    }).catch(error => {
+      if (signal.aborted) throw new Error("本轮学习记录连接超时，请重试。");
+      throw error;
     });
     queue = next.catch(() => null);
     return next;
   }
-  const write = event => request(url => api(url, {method: "POST", headers: json, body: JSON.stringify(event)}));
-  const read = lab => request(url => api(url + "?" + new URLSearchParams({lab})));
+  const write = event => request((url, send) => send(url, {method: "POST", headers: json, body: JSON.stringify(event)}));
+  const read = lab => request((url, send) => send(url + "?" + new URLSearchParams({lab})));
   setInterval(() => {
-    if (path) request(url => api(url + "/touch", {method: "POST", headers: json})).catch(() => {});
+    if (path) request((url, send) => send(url + "/touch", {method: "POST", headers: json})).catch(() => {});
   }, 90000);
   function close() {
     generation++;
@@ -354,7 +400,8 @@ function makeCompanion(activeLab, openResult) {
   const bubble = byId("pet-bubble"), reset = byId("pet-reset");
   const message = byId("pet-reply");
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
-  const input = byId("pet-input");
+  const form = byId("pet-form"), input = byId("pet-input");
+  const send = form.querySelector('button[type="submit"]');
   const quickStudy = byId("quick-study"), restore = byId("pet-restore");
   const quickVoice = quickStudy.querySelector('[data-study="voice"]');
   const motion = byId("pet-motion"), proactive = byId("pet-proactive");
@@ -376,7 +423,7 @@ function makeCompanion(activeLab, openResult) {
     voicePose = pose;
     if (voicePose && voicePose !== "talk") cancelArtwork();
     updateAppearance();
-  });
+  }, showSpokenCaption);
 
   function cancelArtwork() {
     if (!loadingArtwork) return;
@@ -459,6 +506,27 @@ function makeCompanion(activeLab, openResult) {
     bubble.hidden = true;
   }
 
+  function showSpokenCaption(text, finished = false) {
+    if (!text) {
+      if (bubble.dataset.kind === "spoken") {
+        hideBubble();
+        place(panel);
+      }
+      return;
+    }
+    if (avatar.hidden || document.hidden || panel.hidden) return;
+    if (bubble.hidden || bubble.dataset.kind !== "spoken") {
+      hideBubble();
+      bubble.dataset.kind = "spoken";
+      bubble.setAttribute("aria-live", "off");
+      bubble.hidden = false;
+    }
+    bubble.textContent = text;
+    place(bubble);
+    place(panel);
+    if (finished) bubbleTimer = setTimeout(() => { hideBubble(); place(panel); }, 3200);
+  }
+
   function announce(text = message.textContent, kind = "reply") {
     if (!text || !proactive.checked || avatar.hidden || !panel.hidden) return false;
     if (document.hidden || byId("appearance").open || byId("editor-settings").open) {
@@ -472,6 +540,7 @@ function makeCompanion(activeLab, openResult) {
     bubble.hidden = false;
     bubble.textContent = text;
     bubble.dataset.kind = kind;
+    bubble.removeAttribute("aria-live");
     place(bubble);
     bubbleTimer = setTimeout(hideBubble, kind === "welcome" ? 8500 : 6200);
     return true;
@@ -487,9 +556,28 @@ function makeCompanion(activeLab, openResult) {
   function place(floating) {
     if (floating.hidden) return;
     const {left, top, right, bottom} = avatar.getBoundingClientRect();
-    const gap = 12, width = floating.offsetWidth, height = floating.offsetHeight;
-    const above = top - height - gap;
+    const gap = 12, width = floating.offsetWidth;
     const x = Math.max(gap, Math.min(innerWidth - width - gap, right - width));
+    if (floating === panel) {
+      panel.style.removeProperty("max-height");
+      if (!bubble.hidden && bubble.dataset.kind === "spoken") {
+        const caption = bubble.getBoundingClientRect();
+        const side = Math.min(caption.left, left) - width - gap;
+        if (side >= gap) {
+          panel.style.left = side + "px";
+          panel.style.top = Math.max(gap, Math.min(caption.top, innerHeight - panel.offsetHeight - gap)) + "px";
+          return;
+        }
+        if (caption.top >= 2 * gap + 120) {
+          panel.style.maxHeight = (caption.top - 2 * gap) + "px";
+          panel.style.left = x + "px";
+          panel.style.top = (caption.top - gap - panel.offsetHeight) + "px";
+          return;
+        }
+      }
+    }
+    const height = floating.offsetHeight;
+    const above = top - height - gap;
     if (above >= gap || bottom + gap + height <= innerHeight - gap) {
       floating.style.left = x + "px";
       floating.style.top = (above >= gap ? above : bottom + gap) + "px";
@@ -508,8 +596,8 @@ function makeCompanion(activeLab, openResult) {
     avatar.style.left = position.x + "px";
     avatar.style.top = position.y + "px";
     reset.hidden = false;
-    place(panel);
     place(bubble);
+    place(panel);
   }
 
   function stopRoaming() {
@@ -859,7 +947,14 @@ function makeCompanion(activeLab, openResult) {
   });
   document.addEventListener("keydown", event => {
     lastInteraction = performance.now();
-    if (event.key === "Escape" && !panel.hidden && !byId("appearance").open && !byId("editor-settings").open) setOpen(false);
+    if (event.defaultPrevented || event.isComposing || document.querySelector("dialog[open]")) return;
+    if (event.key === "Escape" && !panel.hidden) setOpen(false);
+    if (event.code !== "KeyM" || !event.ctrlKey || !event.altKey || event.shiftKey || event.metaKey ||
+        event.getModifierState("AltGraph") || avatar.hidden || quickVoice.disabled) return;
+    event.preventDefault();
+    if (event.repeat) return;
+    if (panel.hidden) setOpen(true, false);
+    voice.toggleShortcut();
   });
   document.addEventListener("pointerdown", () => { lastInteraction = performance.now(); }, {passive: true});
   motion.addEventListener("change", () => {
@@ -909,14 +1004,30 @@ function makeCompanion(activeLab, openResult) {
     goHome();
     byId("pet-close").focus();
   });
-  byId("pet-form").addEventListener("submit", async event => {
+  input.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    if (!event.repeat && !send.disabled) form.requestSubmit(send);
+  });
+  form.addEventListener("submit", async event => {
     event.preventDefault();
     const text = input.value.trim();
+    if (!text || send.disabled) return;
+    voice.stop();
+    send.disabled = true;
     input.value = "";
-    if (!text) return;
-    const reply = await respond(text);
-    if (!panel.hidden) voice.readReply(true);
-    remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(text)});
+    message.textContent = "正在回复…";
+    try {
+      const reply = await respond(text);
+      if (!panel.hidden) voice.readReply(true);
+      remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(text)});
+    } catch (error) {
+      if (!input.value) input.value = text;
+      speak("这次没能回复，请再试一次。");
+      showMemoryStatus(error.message);
+    } finally {
+      send.disabled = false;
+    }
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {

@@ -225,6 +225,7 @@ td code { font: 18px var(--mono); }
 .pet-bubble { position: fixed; z-index: 2; width: min(312px, calc(100vw - 24px));
   padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
   box-shadow: 0 4px 18px oklch(.30 .05 266 / .10); pointer-events: none; }
+.pet-bubble[data-kind="spoken"] { z-index: 5; }
 .pet-bubble:not([style]) { right: 15px; bottom: min(calc(19dvh + 17px), 224px); }
 .pet-head, .pet-form { display: flex; align-items: center; gap: 8px; }
 .pet-head { justify-content: space-between; }
@@ -287,7 +288,7 @@ td code { font: 18px var(--mono); }
     <div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div>
     <div class="quick-study" id="quick-study" aria-label="助教学习工具" role="group">
       <button class="button" type="button" data-study="chat" disabled>问助教</button>
-      <button class="button" type="button" data-study="voice" disabled>语音提问</button>
+      <button class="button" type="button" data-study="voice" aria-keyshortcuts="Control+Alt+M" disabled>语音提问</button>
       <button class="button" type="button" data-study="quiz" disabled>概念小测</button>
       <button class="button" type="button" data-study="progress" disabled>学习进度</button>
     </div>
@@ -363,12 +364,12 @@ td code { font: 18px var(--mono); }
   <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问鲸鱼娘" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
   <div class="pet-voice">
-    <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false">语音输入</button>
+    <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false" aria-keyshortcuts="Control+Alt+M">语音输入</button>
       <button id="pet-read" class="button" type="button">朗读回复</button>
-      <label><input type="checkbox" id="pet-autoread"> 自动朗读</label></div>
+      <label><input type="checkbox" id="pet-autoread" checked> 自动朗读</label></div>
     <p id="pet-voice-status" class="muted" role="status" hidden></p>
   </div>
-  <p class="muted pet-help">可拖动桌宠。键盘聚焦后用方向键移动，Esc 收起。</p>
+  <p class="muted pet-help">可拖动桌宠，聚焦后可用方向键移动。Ctrl + Alt + M 开始或结束语音输入，Esc 收起。</p>
   <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
     <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
 </aside>
@@ -420,7 +421,7 @@ async function api(path, options) {
   if (rs.redirected || rs.status === 401 || rs.status === 403) throw new Error(previewHint);
   const data = await rs.json().catch(() => null);
   if (!data) throw new Error(previewHint);
-  if (!rs.ok) throw new Error(data.error || "请求失败");
+  if (!rs.ok) throw Object.assign(new Error(data.error || "请求失败"), {status: rs.status});
   return data;
 }
 function notice(message = "") {

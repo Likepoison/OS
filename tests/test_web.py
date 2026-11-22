@@ -49,9 +49,9 @@ class Demo(TestCase):
                           abort() { this.cancelled = true; }
                         };
                         window.Audio = class {
-                          constructor(url) { this.url = url; }
-                          play() { this.onplaying?.(); return Promise.resolve(); }
-                          pause() {}
+                          constructor(url) { this.url = url; this.duration = 6; this.currentTime = 0; }
+                          play() { window.currentNarration = this; this.paused = false; this.onplaying?.(); return Promise.resolve(); }
+                          pause() { this.paused = true; }
                         };
                     """)
                     errors = []
@@ -82,6 +82,13 @@ class Demo(TestCase):
                     expect(page.locator(".brand")).to_contain_text("TraceTutor")
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
+                    source = page.locator("#source")
+                    source.fill("first line")
+                    source.press("End")
+                    source.press("Enter")
+                    expect(source).to_have_value("first line\n")
+                    expect(page.locator("#status")).to_have_text("待提交")
+                    page.locator("#bad").click()
                     self.assertEqual(page.locator(".grid > .panel").evaluate_all(
                         "(nodes) => new Set(nodes.map(n => n.getBoundingClientRect().bottom)).size"), 1)
                     quote = page.locator("#quote")
@@ -177,13 +184,23 @@ class Demo(TestCase):
                     })""")
                     expect(prompt).to_have_value("我的学习进度怎样")
                     expect(pet_reply).to_contain_text("答对啦")
-                    pet_panel.get_by_label("自动朗读").check()
+                    expect(pet_panel.get_by_label("自动朗读")).to_be_checked()
+                    prompt.dispatch_event("keydown", {"key": "Enter", "code": "Enter", "isComposing": True})
+                    expect(prompt).to_have_value("我的学习进度怎样")
                     with page.expect_request("**/api/pet/speech") as spoken:
                         prompt.press("Enter")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
                     self.assertIn("概念题答对 1/2 次", spoken.value.post_data_json["text"])
                     expect(pet).to_have_attribute("data-pose", "talk")
-                    pet_panel.get_by_role("button", name="停止朗读").click()
+                    text = spoken.value.post_data_json["text"]
+                    expect(pet_bubble).to_have_attribute("data-kind", "spoken")
+                    expect(pet_bubble).to_have_text(text[:1])
+                    cue = pet_bubble.bounding_box()
+                    self.assertLess(cue["y"] + cue["height"], pet.bounding_box()["y"])
+                    page.evaluate("() => { window.currentNarration.currentTime = 3; }")
+                    expect(pet_bubble).to_have_text(text[:1 + len(text) // 2])
+                    page.evaluate("() => window.currentNarration.onended()")
+                    expect(pet_bubble).to_have_text(text)
                     pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
@@ -202,6 +219,11 @@ class Demo(TestCase):
                                         (req.method == "GET" and "/pet/" in req.url) for req in requests))
                     self.assertEqual(page.evaluate("localStorage.length + sessionStorage.length"), 0)
                     page.remove_listener("request", collect)
+                    stale = "http://127.0.0.1:8000/api/pet/sessions/" + session_ids[-1]
+                    self.assertEqual(page.request.post(stale + "/close").status, 200)
+                    prompt.fill("现在的学习进度")
+                    pet_panel.get_by_role("button", name="发送", exact=True).click()
+                    expect(pet_reply).to_contain_text("概念题答对 0/0 次")
                     pet_panel.get_by_role("button", name="回到角落").click()
                     self.assertEqual(pet.bounding_box()["x"], original["x"])
                     voice.click()
@@ -304,14 +326,14 @@ class Demo(TestCase):
                         cloud_voice.route("**/api/pet/voice", check_recording)
                         cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
                         expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()
-                        cloud_voice.get_by_role("button", name="语音提问").click()
+                        cloud_voice.keyboard.press("Control+Alt+m")
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
                         expect(stop).to_be_visible()
                         expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
                         # The fake microphone supplies real-time audio to MediaRecorder.
                         cloud_voice.wait_for_timeout(850)
                         with cloud_voice.expect_request("**/api/pet/voice"):
-                            stop.click()
+                            cloud_voice.keyboard.press("Control+Alt+m")
                         cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
                         expect(cloud_prompt).to_have_value("我的学习进度怎样")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
