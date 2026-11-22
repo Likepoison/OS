@@ -36,7 +36,9 @@ class Demo(TestCase):
                         sleep(.2)
 
                 with sync_playwright() as runtime:
-                    browser = runtime.chromium.launch()
+                    browser = runtime.chromium.launch(args=[
+                        "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
+                    ])
                     context = browser.new_context(viewport={"width": 1440, "height": 960})
                     page = context.new_page()
                     session_ids = []
@@ -104,19 +106,19 @@ class Demo(TestCase):
                     pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
                     pet_reply = pet_panel.locator("#pet-reply")
                     portrait = pet.locator(".pet-figure")
-                    expect(portrait).to_have_css("background-image", re.compile("whale-actions.webp"))
+                    expect(portrait).to_have_css("background-image", re.compile("whale-greeting.webp"))
                     self.assertEqual(page.evaluate("""async () => {
                       const image = new Image();
-                      image.src = '/pet/whale-actions.webp';
+                      image.src = '/pet/whale-greeting.webp';
                       await image.decode();
                       return [image.naturalWidth, image.naturalHeight];
-                    }"""), [1216, 1064])
+                    }"""), [2048, 1280])
                     pet_bubble = page.locator("#pet-bubble")
                     self.assertGreater(portrait.bounding_box()["width"], 100)
                     expect(pet).to_have_css("background-color", "rgba(0, 0, 0, 0)")
                     page.emulate_media(reduced_motion="no-preference")
                     pet.hover()
-                    expect(pet).to_have_attribute("data-pose", "play")
+                    expect(pet).to_have_attribute("data-pose", "greet")
                     original = pet.bounding_box()
                     page.mouse.down()
                     page.mouse.move(original["x"] - 70, original["y"] - 60, steps=5)
@@ -183,30 +185,46 @@ class Demo(TestCase):
                     try:
                         mobile.set_viewport_size({"width": 390, "height": 844})
                         mobile.clock.install()
+                        mobile.add_init_script("""
+                            let hiddenTab = true;
+                            Object.defineProperty(document, "hidden", {get: () => hiddenTab});
+                            window.showTraceTab = () => {
+                              hiddenTab = false;
+                              document.dispatchEvent(new Event("visibilitychange"));
+                            };
+                        """)
                         pending_art = []
-                        mobile.route("**/pet/whale-actions.webp", lambda route: pending_art.append(route))
-                        with mobile.expect_request("**/pet/whale-actions.webp"):
+                        mobile.route("**/pet/whale-greeting.webp", lambda route: pending_art.append(route))
+                        with mobile.expect_request("**/pet/whale-greeting.webp"):
                             mobile.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
                         mobile_pet = mobile.locator("#pet-launch")
                         expect(mobile_pet.locator(".pet-figure")).to_have_css("background-image", re.compile("whale-stand.webp"))
                         self.assertTrue(pending_art)
+                        mobile.evaluate("window.showTraceTab()")
+                        expect(mobile.locator("#pet-bubble")).to_have_attribute("data-kind", "welcome")
+                        expect(mobile_pet).to_have_attribute("data-pose", "greet")
+                        expect(mobile_pet.locator(".pet-figure")).to_have_css("animation-name", "pet-hello")
                         pending_art[0].continue_()
-                        expect(mobile_pet).to_have_attribute("data-figure", "ready")
+                        expect(mobile_pet).to_have_attribute("data-sheet", "greeting")
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
                         self.assertTrue(mobile.locator(".grid > .panel").evaluate_all(
                             "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
                         mobile.mouse.move(20, 120)
                         home = mobile_pet.bounding_box()["x"]
-                        mobile.clock.run_for(12000)
+                        mobile.clock.run_for(5700)
                         expect(mobile_pet).to_have_attribute("data-roaming", "true")
                         self.assertLess(float(mobile_pet.evaluate("(el) => parseFloat(el.style.left)")), home - 40)
-                        mobile.clock.run_for(10000)
+                        mobile.clock.run_for(5200)
+                        expect(mobile_pet).to_have_attribute("data-pose", "look")
+                        mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "sit")
-                        mobile.clock.run_for(11000)
+                        mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "snack")
-                        mobile.clock.run_for(11000)
+                        mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "play")
+                        mobile.clock.run_for(5200)
+                        expect(mobile_pet).to_have_attribute("data-pose", "sleep")
                         mobile.get_by_role("button", name="外观设置").click()
                         mobile.get_by_label("桌宠自由活动").uncheck()
                         mobile.get_by_label("桌宠主动气泡").uncheck()
@@ -216,6 +234,40 @@ class Demo(TestCase):
                         expect(mobile.locator("#pet-bubble")).to_be_hidden()
                     finally:
                         mobile.close()
+                    cloud_voice = context.new_page()
+                    try:
+                        def voice_configuration(route):
+                            config = route.fetch().json()
+                            config["voice"] = True
+                            route.fulfill(json=config)
+
+                        def check_recording(route):
+                            self.assertEqual(route.request.headers["content-type"], "audio/pcm")
+                            self.assertGreaterEqual(len(route.request.post_data_buffer), 8000)
+                            route.fulfill(json={"text": "我的学习进度怎样"})
+
+                        cloud_voice.route("**/api/labs", voice_configuration)
+                        cloud_voice.route("**/api/pet/voice", check_recording)
+                        cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
+                        expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()
+                        cloud_voice.get_by_role("button", name="语音提问").click()
+                        stop = cloud_voice.get_by_role("button", name="结束并转写")
+                        expect(stop).to_be_visible()
+                        expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
+                        # The fake microphone still captures real-time PCM through the browser.
+                        cloud_voice.wait_for_timeout(850)
+                        with cloud_voice.expect_request("**/api/pet/voice"):
+                            stop.click()
+                        cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
+                        expect(cloud_prompt).to_have_value("我的学习进度怎样")
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
+                        cloud_prompt.press("Enter")
+                        expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
+                        invalid = cloud_voice.request.post("http://127.0.0.1:8000/api/pet/voice",
+                                                           data=b"\0" * 384001, headers={"Content-Type": "audio/pcm"})
+                        self.assertEqual(invalid.status, 413)
+                    finally:
+                        cloud_voice.close()
                     if out := os.getenv("TRACE_SCREENSHOTS"):
                         Path(out).mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=f"{out}/workspace.png", full_page=True)
@@ -235,7 +287,7 @@ class Demo(TestCase):
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
                         expect(pet).to_have_attribute("data-pose", "focus")
-                        expect(portrait).to_have_css("animation-name", "pet-frames")
+                        expect(portrait).to_have_css("animation-name", "pet-frames", timeout=10000)
                         expect(pet_bubble).to_be_visible()
                         held[0].continue_()
                     page.unroute("**/api/runs")

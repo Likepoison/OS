@@ -170,25 +170,47 @@ td code { font: 12px var(--mono); }
 .pet-launch.dragging { cursor: grabbing; }
 .pet-figure { display: block; width: 100%; height: 100%; pointer-events: none;
   --row: 0%; --cycle: 2.6s;
-  background: url("/pet/whale-stand.webp") center / contain no-repeat;
-  transform-origin: 50% 86%; filter: drop-shadow(0 4px 5px #23365b38); }
-.pet-launch[data-figure="ready"] .pet-figure {
-  background: url("/pet/whale-actions.webp") 0 var(--row) / 800% 700% no-repeat;
+  background: url("/pet/whale-stand.webp?v=2") center / contain no-repeat;
+  transform-origin: 50% 86%; filter: drop-shadow(0 3px 3px #23365b30); }
+.pet-launch[data-sheet] .pet-figure {
+  background: var(--frames) 0 var(--row) / 800% var(--rows) no-repeat;
 }
+.pet-launch[data-sheet="greeting"] { --frames: url("/pet/whale-greeting.webp"); --rows: 500%; }
+.pet-launch[data-sheet="actions"] { --frames: url("/pet/whale-actions.webp?v=2"); --rows: 700%; }
 .pet-launch[data-facing="left"] .pet-figure { transform: scaleX(-1); }
-.pet-launch[data-pose="walk"] .pet-figure { --row: 16.666667%; --cycle: .68s; }
-.pet-launch[data-pose="sit"] .pet-figure { --row: 33.333333%; --cycle: 2.4s; }
-.pet-launch[data-pose="snack"] .pet-figure { --row: 50%; --cycle: 2.1s; }
-.pet-launch[data-pose="play"] .pet-figure { --row: 66.666667%; --cycle: 1.05s; }
+.pet-launch[data-pose="greet"] .pet-figure { --row: 25%; --cycle: 1.4s; }
+.pet-launch[data-pose="walk"] .pet-figure { --row: 50%; --cycle: .68s; }
+.pet-launch[data-pose="listen"] .pet-figure { --row: 75%; --cycle: 1.8s; }
+.pet-launch[data-pose="talk"] .pet-figure { --row: 100%; --cycle: .95s; }
+.pet-launch[data-pose="sit"] .pet-figure { --row: 0%; --cycle: 2.5s; }
+.pet-launch[data-pose="snack"] .pet-figure { --row: 16.666667%; --cycle: 2.1s; }
+.pet-launch[data-pose="play"] .pet-figure { --row: 33.333333%; --cycle: 1.05s; }
+.pet-launch[data-pose="look"] .pet-figure { --row: 50%; --cycle: 2.0s; }
+.pet-launch[data-pose="sleep"] .pet-figure { --row: 66.666667%; --cycle: 3.2s; }
 .pet-launch[data-pose="focus"] .pet-figure { --row: 83.333333%; --cycle: 2.2s; }
 .pet-launch[data-pose="drag"] .pet-figure { --row: 100%; --cycle: .8s; }
 @media (prefers-reduced-motion: no-preference) {
   .pet-launch[data-roaming="true"] { transition: left 1.85s ease-in-out, top 1.85s ease-in-out; }
-  .pet-launch[data-motion="true"][data-figure="ready"] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
+  .pet-launch[data-motion="true"][data-sheet] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
+  .pet-launch[data-motion="true"]:not([data-sheet])[data-pose="stand"] .pet-figure {
+    animation: pet-breathe 2.8s ease-in-out infinite;
+  }
+  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="greet"], [data-pose="look"], [data-pose="talk"]) .pet-figure {
+    animation: pet-hello 1.4s ease-in-out;
+  }
+  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="walk"], [data-pose="play"]) .pet-figure {
+    animation: pet-step .55s ease-in-out infinite;
+  }
+  .pet-launch[data-motion="true"]:not([data-sheet]):is([data-pose="sit"], [data-pose="sleep"]) .pet-figure {
+    scale: 1 .94; animation: pet-breathe 3.2s ease-in-out infinite;
+  }
   .pet-launch[data-motion="true"][data-pose="snack"] .pet-figure { animation-iteration-count: 1; animation-fill-mode: forwards; }
   .pet-launch[data-motion="true"]:hover .pet-figure { filter: drop-shadow(0 5px 8px #365ad267); }
 }
 @keyframes pet-frames { from { background-position-x: 0%; } to { background-position-x: 100%; } }
+@keyframes pet-hello { 20%, 70% { rotate: -7deg; translate: 0 -5px; } 45% { rotate: 5deg; } }
+@keyframes pet-step { 50% { translate: 0 -7px; rotate: 3deg; } }
+@keyframes pet-breathe { 50% { translate: 0 -2px; } }
 .pet-panel { position: fixed; z-index: 4; width: min(390px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain;
   padding: 15px; border: 1px solid var(--line); border-radius: 17px;
@@ -196,6 +218,7 @@ td code { font: 12px var(--mono); }
 .pet-bubble { position: fixed; z-index: 2; width: min(290px, calc(100vw - 24px));
   padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
   box-shadow: 0 4px 18px oklch(.30 .05 266 / .10); font-size: 15px; pointer-events: none; }
+.pet-bubble:not([style]) { right: 15px; bottom: min(calc(19dvh + 17px), 224px); }
 .pet-head, .pet-form { display: flex; align-items: center; gap: 8px; }
 .pet-head { justify-content: space-between; }
 .pet-head h2 { margin: 0; }
@@ -232,6 +255,7 @@ td code { font: 12px var(--mono); }
   .labbar { flex-wrap: wrap; gap: 5px; }
   .panel-head, .panel-foot, #contents { padding-inline: 13px; }
   .pet-launch { --pet-size: clamp(104px, 15dvh, 146px); --pet-edge: 8px; }
+  .pet-bubble:not([style]) { right: 9px; bottom: min(calc(15dvh + 17px), 165px); }
 }
 </style>
 </head>
@@ -254,6 +278,7 @@ td code { font: 12px var(--mono); }
     <div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div>
     <div class="quick-study" id="quick-study" aria-label="助教学习工具" role="group">
       <button class="button" type="button" data-study="chat">问助教</button>
+      <button class="button" type="button" data-study="voice">语音提问</button>
       <button class="button" type="button" data-study="quiz">概念小测</button>
       <button class="button" type="button" data-study="progress">学习进度</button>
     </div>
@@ -315,10 +340,10 @@ td code { font: 12px var(--mono); }
   <form class="close-preferences" method="dialog"><button class="button" type="submit">完成</button></form>
 </dialog>
 <button id="pet-launch" class="pet-launch" type="button" aria-label="鲸鱼娘助教" aria-controls="pet-panel"
-  aria-expanded="false" data-motion="true" title="鲸鱼娘助教 · 点击打开，可拖动">
+  aria-expanded="false" data-motion="true" data-pose="greet" title="鲸鱼娘助教 · 点击打开，可拖动">
   <span class="pet-figure" aria-hidden="true"></span>
 </button>
-<p id="pet-bubble" class="pet-bubble" role="status" hidden></p>
+<p id="pet-bubble" class="pet-bubble" role="status">嗨，我是鲸鱼娘助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>
   <div class="pet-head"><h2 id="pet-title" tabindex="-1">鲸鱼娘助教</h2>
     <button id="pet-close" class="button" type="button">收起</button></div>
@@ -362,7 +387,7 @@ const labels = {
 };
 let labs = [], record, tab = "grade", polling = false, caseIndex = 0, onlyEvidence = false, viewVersion = 0;
 let historyVersion = 0, pair = [];
-let companion;
+let companion, serverVoice = false;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -379,7 +404,10 @@ async function api(path, options) {
   const previewHint = "连接评测服务失败。请确认 Codespace 正在运行，并从 Ports 重新打开私有预览。";
   let rs;
   try { rs = await fetch(path, options); }
-  catch { throw new Error(previewHint); }
+  catch (error) {
+    if (error.name === "AbortError") throw error;
+    throw new Error(previewHint);
+  }
   if (rs.redirected || rs.status === 401 || rs.status === 403) throw new Error(previewHint);
   const data = await rs.json().catch(() => null);
   if (!data) throw new Error(previewHint);
@@ -782,6 +810,8 @@ api("/api/labs").then(data => {
     byId("filter").append(option.cloneNode(true));
   }
   byId("ai").disabled = !data.ai;
+  serverVoice = data.voice === true;
+  companion?.enableVoice(serverVoice);
   if (!data.ai) byId("ai").parentElement.title = "配置模型凭据后可启用，当前使用规则提示";
   loadExample(true);
 }).catch(err => notice(err.message));

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.util import find_spec
 import json
 import logging
 import os
@@ -22,8 +23,10 @@ DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
+    "/pet/voice-capture.js": "text/javascript; charset=utf-8",
     "/pet/whale-girl.png": "image/png",
     "/pet/whale-stand.webp": "image/webp",
+    "/pet/whale-greeting.webp": "image/webp",
     "/pet/whale-actions.webp": "image/webp",
 }
 RUN_ROUTE = re.compile(r"/api/runs/([a-f0-9]{32})(?:/(events|raw)/([0-9]{1,3}))?")
@@ -33,7 +36,33 @@ WORKERS = ThreadPoolExecutor(max_workers=2)
 SLOTS = BoundedSemaphore(LIMIT)
 PET_MEMORY = StudyMemory()
 PET_ROUTE = re.compile(r"/api/pet/sessions/([a-f0-9]{32})(?:/(close|touch))?")
+VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL",
+                            PAGE.parent / ".tracetutor/voice/vosk-model-small-cn-0.22"))
+AUDIO_RATE = 16000
+AUDIO_LIMIT = 12 * AUDIO_RATE * 2
+VOICE_SLOT = BoundedSemaphore(1)
+voice_model = None
 logging.basicConfig(level=logging.INFO)
+
+
+def voice_available():
+    return (VOICE_PATH / "am/final.mdl").is_file() and find_spec("vosk") is not None
+
+
+def transcribe_voice(audio):
+    from vosk import KaldiRecognizer, Model, SetLogLevel
+
+    global voice_model
+    if voice_model is None:
+        SetLogLevel(-1)
+        voice_model = Model(str(VOICE_PATH))
+    recognizer = KaldiRecognizer(voice_model, AUDIO_RATE)
+    parts = []
+    for start in range(0, len(audio), 4096):
+        if recognizer.AcceptWaveform(audio[start:start + 4096]):
+            parts.append(json.loads(recognizer.Result())["text"])
+    parts.append(json.loads(recognizer.FinalResult())["text"])
+    return re.sub(r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])", "", " ".join(parts)).strip()[:100]
 
 
 @contextmanager
@@ -125,6 +154,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/labs":
             return self.send_data(200, {
                 "ai": bool(os.getenv("DEEPSEEK_API_KEY")),
+                "voice": voice_available(),
                 "labs": [{"id": key, "title": lab["title"], "summary": lab["summary"],
                           "sample": sample(lab), "broken": sample(lab, broken=True)}
                          for key, lab in LABS.items()],
@@ -195,7 +225,40 @@ class Handler(BaseHTTPRequestHandler):
         except OverflowError:
             return self.send_data(429, {"error": "本轮桌宠记忆已满。请先回顾已记录内容。"})
 
+    def pet_voice_request(self):
+        if self.headers.get_content_type() != "audio/pcm":
+            return self.send_data(415, {"error": "录音格式无效。"})
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            return self.send_data(400, {"error": "录音长度无效。"})
+        if size > AUDIO_LIMIT:
+            return self.send_data(413, {"error": "一次最多录制 12 秒。"})
+        if size < AUDIO_RATE // 2 or size % 2:
+            return self.send_data(400, {"error": "录音太短，请说完后再结束。"})
+        if not voice_available():
+            return self.send_data(503, {"error": "演示环境的普通话识别暂不可用。"})
+        if not VOICE_SLOT.acquire(blocking=False):
+            return self.send_data(429, {"error": "语音转写正在处理，请稍后重试。"})
+        try:
+            try:
+                audio = self.rfile.read(size)
+            except TimeoutError:
+                return self.send_data(408, {"error": "录音上传超时，请重试。"})
+            if len(audio) != size:
+                return self.send_data(400, {"error": "录音未传完，请重试。"})
+            try:
+                transcript = transcribe_voice(audio)
+            except Exception:
+                logging.exception("Voice recognition failed")
+                return self.send_data(503, {"error": "普通话识别暂时失败，请重试或使用文字。"})
+            return self.send_data(200, {"text": transcript})
+        finally:
+            VOICE_SLOT.release()
+
     def do_POST(self):
+        if self.path == "/api/pet/voice":
+            return self.pet_voice_request()
         if self.path == "/api/pet/sessions":
             if self.headers.get_content_type() != "application/json":
                 return self.send_data(415, {"error": "请提交 JSON"})
