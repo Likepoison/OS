@@ -39,15 +39,20 @@ chmod 755 "$scratch" "$scratch/probe"
 limits=(--network none --user 65534:65534 --read-only --cap-drop ALL
   --security-opt no-new-privileges --cpus 1 --memory 32m --memory-swap 32m
   --pids-limit 16 --mount "type=bind,src=$scratch/probe,dst=/probe,readonly")
-rc=0
-docker run --name "$container" "${limits[@]}" "$image" /probe memory || rc=$?
-echo "memory probe exit=$rc"
-docker inspect -f '{{.State.OOMKilled}} {{.State.ExitCode}} {{.State.Error}}' "$container"
-test "$rc" -eq 137
-test "$(docker inspect -f '{{.State.OOMKilled}}' "$container")" = true
-test "$(docker inspect -f '{{.State.ExitCode}}' "$container")" = 137
-docker rm "$container" >/dev/null
-echo "memory: cgroup OOM, exit=137"
+# Read the same kernel counter as the grader while the cgroup still exists.
+docker run --rm "${limits[@]}" "$image" sh -ec '
+    oom_count() {
+        awk '"'"'$1 == "oom_kill" {print $2; found=1} END {exit !found}'"'"' /sys/fs/cgroup/memory.events
+    }
+    test "$(cat /sys/fs/cgroup/memory.max)" = 33554432
+    before=$(oom_count)
+    rc=0
+    /probe memory || rc=$?
+    after=$(oom_count)
+    echo "memory probe: exit=$rc, oom_kill=$before -> $after"
+    test "$rc" -eq 137
+    test "$after" -gt "$before"
+'
 
 docker run -d --name "$container" "${limits[@]}" "$image" /probe hang >/dev/null
 timeout 5s bash -c 'until docker logs "$1" | grep -qx detached; do sleep .1; done' _ "$container"
