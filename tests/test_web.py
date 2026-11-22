@@ -317,24 +317,43 @@ class Demo(TestCase):
                     cloud_voice = context.new_page()
                     try:
                         pending_config = []
+                        session_requests = []
+                        voice_responses = iter([{"text": "我的学习进度怎样"}, {"text": "", "reason": "no_signal"}])
+                        cloud_voice.add_init_script("""(() => {
+                          const media = navigator.mediaDevices;
+                          const capture = media.getUserMedia.bind(media);
+                          media.getUserMedia = settings => {
+                            window.lastCapture = settings.audio;
+                            if (window.denyMicrophone) return Promise.reject(new DOMException("Blocked", "NotAllowedError"));
+                            return capture(settings);
+                          };
+                        })();""")
+
+                        def capture_session_request(request):
+                            if "/api/pet/sessions" in request.url:
+                                session_requests.append(request)
+
+                        cloud_voice.on("request", capture_session_request)
 
                         def check_recording(route):
                             self.assertTrue(route.request.headers["content-type"].startswith("audio/webm"))
                             clip = route.request.post_data_buffer
                             self.assertTrue(clip.startswith(b"\x1a\x45\xdf\xa3"))
                             self.assertLess(len(clip), 16000)
-                            route.fulfill(json={"text": "我的学习进度怎样"})
+                            route.fulfill(json=next(voice_responses))
 
                         cloud_voice.route("**/api/labs", lambda route: pending_config.append(route))
                         cloud_voice.route("**/api/pet/voice", check_recording)
                         cloud_voice.route("**/api/pet/speech", lambda route: route.fulfill(
                             status=503, json={"error": "朗读测试服务暂不可用。"}))
-                        with cloud_voice.expect_response("**/api/pet/sessions") as session:
-                            cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
+                        cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
                         cloud_voice.get_by_role("button", name="问助教", exact=True).click()
+                        expect(cloud_voice.locator("#pet-memory-status")).to_be_hidden()
+                        self.assertEqual(session_requests, [])
                         cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
                         cloud_prompt.fill("你好")
-                        cloud_prompt.press("Enter")
+                        with cloud_voice.expect_response("**/api/pet/sessions") as session:
+                            cloud_prompt.press("Enter")
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("你好呀")
                         self.assertEqual(len(pending_config), 1)
                         config = pending_config[0].fetch().json()
@@ -362,6 +381,8 @@ class Demo(TestCase):
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
                         expect(stop).to_be_visible()
                         expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
+                        expect(cloud_voice.locator("#pet-mic-level")).to_be_visible()
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("录音")
                         # The fake microphone supplies real-time audio to MediaRecorder.
                         cloud_voice.wait_for_timeout(850)
                         cloud_voice.keyboard.down("t")
@@ -370,6 +391,7 @@ class Demo(TestCase):
                             cloud_voice.keyboard.up("t")
                         expect(cloud_prompt).to_have_value("我的学习进度怎样")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
+                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
                         cloud_prompt.press("Enter")
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
                         stale = session.value.url + "/" + session.value.json()["id"]
@@ -379,6 +401,20 @@ class Demo(TestCase):
                             cloud_voice.get_by_role("button", name="发送", exact=True).click()
                         self.assertEqual(renewed.value.status, 201)
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
+                        selected = cloud_voice.locator("#pet-mic-device")
+                        expect(selected).to_be_visible()
+                        hardware = selected.locator("option").nth(1).get_attribute("value")
+                        selected.select_option(hardware)
+                        cloud_voice.get_by_role("button", name="语音输入", exact=True).click()
+                        expect(stop).to_be_visible()
+                        self.assertEqual(cloud_voice.evaluate("() => window.lastCapture.deviceId.exact"), hardware)
+                        cloud_voice.wait_for_timeout(850)
+                        stop.click()
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("几乎没有收到声音")
+                        cloud_voice.evaluate("() => { window.denyMicrophone = true; }")
+                        cloud_voice.get_by_role("button", name="语音输入", exact=True).click()
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("本站权限")
+                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
                         invalid = cloud_voice.request.post("http://127.0.0.1:8000/api/pet/voice",
                                                            data=b"\0" * 131073, headers={"Content-Type": "audio/webm"})
                         self.assertEqual(invalid.status, 413)

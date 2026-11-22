@@ -31,6 +31,8 @@ python app.py
 
 焦点在输入框外时，按住 `T` 录音，松开即转写。也可以点「语音提问」录音，讲完点「结束并转写」。确认文字后点击「发送」或在助教输入框按回车。代码编辑器内的回车用于换行。录音最长 12 秒，经浏览器压缩后由 Codespace 中的 [SenseVoice](https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html) 转写，录音只在处理期间留在内存。录音需要 HTTPS 或本机回环地址。
 
+授权后可在助教面板选择本机麦克风，并在录音时查看设备名称和输入音量。若当前设备是「立体声混音」或虚拟输入，请切换到实际使用的内置或耳麦麦克风。
+
 助教回复默认使用 [Piper 小雅普通话女声](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html) 自动朗读，头顶气泡随播放进度逐字显示。面板内可以关闭「自动朗读」或手动重听。
 
 新建演示环境时，在 Linux 终端执行一次 `bash .devcontainer/setup-voice.sh`，再启动或重启 `python app.py`。两个语音模型保存在被 Git 忽略的运行目录。尚未安装模型时，支持 Web Speech API 的浏览器可以尝试内置识别，音频可能由浏览器提供方处理。桌宠话术基于当前页提供的结构化实验信息和已发送的提问，DeepSeek 分层反馈仍可从实验结果进入。

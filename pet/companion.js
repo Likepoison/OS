@@ -45,6 +45,8 @@ const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本�
 function setupPetVoice(input, message, resize, setVoicePose, caption) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
+  const devices = byId("pet-mic-devices"), device = byId("pet-mic-device");
+  const level = byId("pet-mic-level"), meter = byId("pet-mic-meter");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const Recorder = window.MediaRecorder;
   const format = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
@@ -86,6 +88,8 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       return;
     }
     useServer = configuration.record && canRecord;
+    devices.hidden = true;
+    if (useServer) refreshInputs();
     mic.disabled = !useServer && !Recognition;
     mic.title = useServer ? "按住 T 录音，松开转写。普通话在当前演示服务内转写"
       : Recognition ? "按住 T 录音，松开转写。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
@@ -139,7 +143,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       if (listener !== active) return;
       clearListener();
       const failure = {
-        "not-allowed": "麦克风权限未开启。请在地址栏允许麦克风后重试，也可以继续打字。",
+        "not-allowed": "浏览器没有拿到麦克风权限。请检查本站权限和系统的麦克风访问设置，也可以继续打字。",
         "service-not-allowed": "浏览器语音识别不可用，可以继续打字。",
         "audio-capture": "找不到可用的麦克风，请连接设备后重试。",
         network: "浏览器语音识别服务连接失败，可以重试或打字。"
@@ -166,9 +170,56 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     if (held && listener === active) return release;
   }
 
+  async function refreshInputs() {
+    if (!navigator.mediaDevices.enumerateDevices) return;
+    try {
+      const entries = await navigator.mediaDevices.enumerateDevices();
+      if (!useServer) return;
+      const inputs = entries.filter(entry => entry.kind === "audioinput" && entry.label &&
+        entry.deviceId && entry.deviceId !== "default" && entry.deviceId !== "communications");
+      const chosen = device.value;
+      device.replaceChildren(new Option("浏览器默认设备", ""), ...inputs.map(entry => new Option(entry.label, entry.deviceId)));
+      if (inputs.some(entry => entry.deviceId === chosen)) device.value = chosen;
+      devices.hidden = inputs.length === 0;
+      resize();
+    } catch (error) {
+      console.debug("Microphone list unavailable", error);
+    }
+  }
+
+  function monitorInput(session) {
+    const Audio = window.AudioContext || window.webkitAudioContext;
+    if (!Audio) return;
+    try {
+      const context = session.monitor = new Audio();
+      const analyser = context.createAnalyser();
+      context.createMediaStreamSource(session.stream).connect(analyser);
+      const samples = new Float32Array(analyser.fftSize);
+      level.hidden = false;
+      meter.value = 0;
+      session.meterTimer = setInterval(() => {
+        analyser.getFloatTimeDomainData(samples);
+        const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
+        meter.value = Math.min(1, rms * 8);
+      }, 100);
+      context.resume().catch(error => console.debug("Microphone level unavailable", error));
+    } catch (error) {
+      console.debug("Microphone level unavailable", error);
+    }
+  }
+
   function releaseAudio(session) {
+    clearInterval(session.meterTimer);
+    if (session.monitor && session.monitor.state !== "closed") {
+      session.monitor.close().catch(error => console.debug("Microphone monitor cleanup", error));
+      session.monitor = undefined;
+    }
     if (session.recorder && session.recorder.state !== "inactive") session.recorder.stop();
     session.stream?.getTracks().forEach(track => track.stop());
+    if (!recording || recording === session) {
+      level.hidden = true;
+      meter.value = 0;
+    }
   }
 
   function closeRecording() {
@@ -178,6 +229,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     clearTimeout(session.timer);
     session.request.abort();
     releaseAudio(session);
+    device.disabled = false;
     micState();
     return true;
   }
@@ -214,7 +266,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       if (recording !== session) return;
       closeRecording();
       if (result.reason === "no_signal") {
-        return note("没有收到麦克风声音。请检查浏览器选用的输入设备和系统麦克风音量。");
+        return note("已从「" + session.deviceName + "」录音，但几乎没有收到声音。请切换到实际麦克风，检查静音和输入音量。");
       }
       showTranscript(result.text);
     } catch (error) {
@@ -227,12 +279,16 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   async function startServerRecording(held) {
     const session = recording = {request: new AbortController(), phase: "permission"};
     try {
+      device.disabled = true;
       micState("取消录音", "listen");
       note("正在打开麦克风。若浏览器询问权限，请选择允许。");
       session.stream = await navigator.mediaDevices.getUserMedia({audio: {
-        channelCount: 1, echoCancellation: true, noiseSuppression: true
+        channelCount: 1, echoCancellation: true, noiseSuppression: true,
+        ...(device.value ? {deviceId: {exact: device.value}} : {})
       }});
       if (recording !== session) return releaseAudio(session);
+      session.deviceName = session.stream.getAudioTracks()[0]?.label || "当前麦克风";
+      refreshInputs();
       const recorder = session.recorder = new Recorder(session.stream, {
         mimeType: format, audioBitsPerSecond: 24000
       });
@@ -248,16 +304,20 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
-      note(held ? "正在听。说完松开 T，最多 12 秒。" : "正在听。说完点「结束并转写」，最多 12 秒。");
+      monitorInput(session);
+      const instruction = held ? "说完松开 T" : "说完点「结束并转写」";
+      note("正在用「" + session.deviceName + "」录音。" + instruction + "，最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
       if (recording !== session) return;
       closeRecording();
       const failure = {
-        NotAllowedError: "麦克风权限未开启。请在地址栏允许麦克风后重试。",
-        NotFoundError: "找不到麦克风。请连接麦克风后重试。",
+        NotAllowedError: "浏览器没有拿到麦克风权限。请检查地址栏的本站权限，以及 Windows 的麦克风和桌面应用访问权限。",
+        NotFoundError: "找不到选定的麦克风，请重新选择或连接设备。",
+        OverconstrainedError: "选定的麦克风已不可用，请重新选择。",
         NotReadableError: "暂时无法打开麦克风。请检查设备是否被占用。"
       };
+      if (error.name === "NotFoundError" || error.name === "OverconstrainedError") refreshInputs();
       note(failure[error.name] || "当前无法录音，请重试或使用文字。");
     }
   }
@@ -802,9 +862,10 @@ function makeCompanion(activeLab, openResult) {
     visibleEvents = total;
     selectedEvent = undefined;
     const runId = activeRun?.id;
-    if (!lastVisit || lastVisit.view !== view || lastVisit.total !== total || lastVisit.runId !== runId) {
+    const previous = lastVisit;
+    if (!previous || previous.view !== view || previous.total !== total || previous.runId !== runId) {
       lastVisit = {view, total, runId};
-      remember({type: "view", view, total, run_id: runId});
+      if (previous) remember({type: "view", view, total, run_id: runId});
     }
     if (changed && (view === "history" || ((view === "trace" || view === "hints") && activeRun?.hasResult))) {
       explainView();

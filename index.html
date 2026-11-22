@@ -236,6 +236,8 @@ td code { font: 18px var(--mono); }
 .pet-form button { flex: none; }
 .pet-voice { margin: 8px 0 0; }
 .pet-voice .tool-row { margin-bottom: 3px; }
+.pet-mic-device, .pet-mic-level { display: flex; align-items: center; gap: 8px; margin-block: 6px; }
+.pet-mic-device select, .pet-mic-level meter { flex: 1; min-width: 0; }
 .pet-quiz { margin: 10px 0; padding: 0; border: 0; min-width: 0; }
 .pet-quiz legend { font-weight: 650; margin-bottom: 6px; padding: 0; }
 .pet-quiz button { display: flex; width: 100%; margin-bottom: 5px; text-align: left; }
@@ -367,6 +369,12 @@ td code { font: 18px var(--mono); }
     <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false" aria-keyshortcuts="T">语音输入</button>
       <button id="pet-read" class="button" type="button">朗读回复</button>
       <label><input type="checkbox" id="pet-autoread" checked> 自动朗读</label></div>
+    <label id="pet-mic-devices" class="pet-mic-device" hidden>麦克风
+      <select id="pet-mic-device"><option value="">浏览器默认设备</option></select>
+    </label>
+    <label id="pet-mic-level" class="pet-mic-level muted" hidden>输入音量
+      <meter id="pet-mic-meter" min="0" max="1" value="0"></meter>
+    </label>
     <p id="pet-voice-status" class="muted" role="status" hidden></p>
   </div>
   <p class="muted pet-help">焦点在输入框外时，按住 T 录音，松开转写。可用方向键移动桌宠，Esc 收起。</p>
