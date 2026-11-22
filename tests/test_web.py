@@ -48,8 +48,10 @@ class Demo(TestCase):
                           stop() {}
                           abort() { this.cancelled = true; }
                         };
-                        window.speechSynthesis.speak = utterance => {
-                          window.lastSpokenReply = utterance.text;
+                        window.Audio = class {
+                          constructor(url) { this.url = url; }
+                          play() { this.onplaying?.(); return Promise.resolve(); }
+                          pause() {}
                         };
                     """)
                     errors = []
@@ -66,6 +68,15 @@ class Demo(TestCase):
                     expect(page.get_by_role("alert")).to_contain_text("从 Ports 重新打开私有预览")
                     expect(page.get_by_role("button", name="运行实验")).to_be_disabled()
                     page.unroute("**/api/labs")
+
+                    def spoken_configuration(route):
+                        config = route.fetch().json()
+                        config.update(voice=False, speech=True)
+                        route.fulfill(json=config)
+
+                    page.route("**/api/labs", spoken_configuration)
+                    page.route("**/api/pet/speech", lambda route: route.fulfill(
+                        content_type="audio/mpeg", body=b"\xff\xfb"))
                     page.reload()
                     expect(page).to_have_title("TraceTutor——操作系统实验评测与智能诊断平台")
                     expect(page.locator(".brand")).to_contain_text("TraceTutor")
@@ -73,7 +84,19 @@ class Demo(TestCase):
                     expect(run).to_be_enabled()
                     self.assertEqual(page.locator(".grid > .panel").evaluate_all(
                         "(nodes) => new Set(nodes.map(n => n.getBoundingClientRect().bottom)).size"), 1)
-                    self.assertTrue(page.locator("#quote-source").get_attribute("href").startswith("https://"))
+                    quote = page.locator("#quote")
+                    quote_source = page.locator("#quote-source")
+                    self.assertTrue(quote_source.get_attribute("href").startswith("https://"))
+                    expect(quote.locator(".quote-line")).to_have_css("white-space", "nowrap")
+                    self.assertGreater(quote_source.bounding_box()["y"], page.locator("#quote-text").bounding_box()["y"])
+                    self.assertTrue(quote.evaluate("(node) => node.scrollWidth <= node.clientWidth"))
+                    self.assertEqual(page.evaluate("""
+                        Math.min(...[...document.querySelectorAll(
+                          'h1,h2,h3,p,span,button,select,textarea,input,small,legend,code,pre,a'
+                        )].filter(el => el.getClientRects().length && (
+                          el.textContent.trim() || el.matches('input,textarea,select')
+                        )).map(el => parseFloat(getComputedStyle(el).fontSize)))
+                    """), 18)
                     page.get_by_role("button", name="外观设置").click()
                     appearance = page.get_by_role("dialog", name="外观设置")
                     appearance.get_by_label("界面主题").select_option("sage")
@@ -93,10 +116,10 @@ class Demo(TestCase):
                     original_code = code.input_value()
                     page.get_by_role("button", name="代码样式").click()
                     options = page.get_by_role("dialog", name="代码样式")
-                    options.get_by_label("字号").select_option("17")
+                    options.get_by_label("字号").select_option("22")
                     options.get_by_label("制表符宽度").select_option("2")
                     options.get_by_label("自动换行").check()
-                    expect(code).to_have_css("font-size", "17px")
+                    expect(code).to_have_css("font-size", "22px")
                     expect(code).to_have_css("tab-size", "2")
                     expect(code).to_have_attribute("wrap", "soft")
                     expect(code).to_have_value(original_code)
@@ -119,6 +142,16 @@ class Demo(TestCase):
                     page.emulate_media(reduced_motion="no-preference")
                     pet.hover()
                     expect(pet).to_have_attribute("data-pose", "greet")
+                    page.mouse.move(20, 130)
+                    pet.hover(position={"x": 8, "y": 55})
+                    expect(pet).to_have_attribute("data-pose", "look")
+                    expect(pet).to_have_attribute("data-gaze", "pointer")
+                    first_gaze = pet.evaluate("(node) => node.style.getPropertyValue('--gaze-frame')")
+                    pet.hover(position={"x": int(pet.bounding_box()["width"]) - 8, "y": 55})
+                    self.assertNotEqual(first_gaze, pet.evaluate("(node) => node.style.getPropertyValue('--gaze-frame')"))
+                    page.mouse.move(20, 130)
+                    pet.hover()
+                    expect(pet).to_have_attribute("data-pose", "play")
                     original = pet.bounding_box()
                     page.mouse.down()
                     page.mouse.move(original["x"] - 70, original["y"] - 60, steps=5)
@@ -146,9 +179,13 @@ class Demo(TestCase):
                     expect(prompt).to_have_value("我的学习进度怎样")
                     expect(pet_reply).to_contain_text("答对啦")
                     pet_panel.get_by_label("自动朗读").check()
-                    prompt.press("Enter")
+                    with page.expect_request("**/api/pet/speech") as spoken:
+                        prompt.press("Enter")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
-                    self.assertIn("概念题答对 1/2 次", page.evaluate("window.lastSpokenReply"))
+                    self.assertIn("概念题答对 1/2 次", spoken.value.post_data_json["text"])
+                    expect(pet).to_have_attribute("data-pose", "talk")
+                    pet_panel.get_by_role("button", name="停止朗读").click()
+                    pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
                     expect(pet_panel.locator("#pet-voice-status")).to_contain_text("可以继续打字")
@@ -193,10 +230,17 @@ class Demo(TestCase):
                               document.dispatchEvent(new Event("visibilitychange"));
                             };
                         """)
+                        pending_script = []
                         pending_art = []
+                        mobile.route("**/pet/companion.js", lambda route: pending_script.append(route))
                         mobile.route("**/pet/whale-greeting.webp", lambda route: pending_art.append(route))
+                        with mobile.expect_request("**/pet/companion.js"):
+                            mobile.goto("http://127.0.0.1:8000", wait_until="commit")
+                        expect(mobile.get_by_role("button", name="语音提问")).to_be_disabled()
+                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         with mobile.expect_request("**/pet/whale-greeting.webp"):
-                            mobile.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
+                            pending_script[0].continue_()
+                        expect(mobile.get_by_role("button", name="问助教")).to_be_enabled()
                         mobile_pet = mobile.locator("#pet-launch")
                         expect(mobile_pet.locator(".pet-figure")).to_have_css("background-image", re.compile("whale-stand.webp"))
                         self.assertTrue(pending_art)
@@ -208,6 +252,7 @@ class Demo(TestCase):
                         expect(mobile_pet).to_have_attribute("data-sheet", "greeting")
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
+                        expect(mobile.locator(".quote-line")).to_have_css("white-space", "nowrap")
                         self.assertTrue(mobile.locator(".grid > .panel").evaluate_all(
                             "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
                         mobile.mouse.move(20, 120)

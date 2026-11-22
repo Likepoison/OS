@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import sys
 from threading import BoundedSemaphore, Thread
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
@@ -18,12 +19,15 @@ from uuid import uuid4
 from engine import ai_hints, evaluate, events_from
 from labs import LABS, sample
 from pet_memory import StudyMemory, clean_event
+import pet_speech
 
 DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
+VOICE_CACHE = PAGE.parent / ".tracetutor/voice"
+if (VOICE_CACHE / "python").is_dir():
+    sys.path.append(str(VOICE_CACHE / "python"))
 PET_ASSETS = {
     "/pet/companion.js": "text/javascript; charset=utf-8",
-    "/pet/voice-capture.js": "text/javascript; charset=utf-8",
     "/pet/whale-girl.png": "image/png",
     "/pet/whale-stand.webp": "image/webp",
     "/pet/whale-greeting.webp": "image/webp",
@@ -36,11 +40,11 @@ WORKERS = ThreadPoolExecutor(max_workers=2)
 SLOTS = BoundedSemaphore(LIMIT)
 PET_MEMORY = StudyMemory()
 PET_ROUTE = re.compile(r"/api/pet/sessions/([a-f0-9]{32})(?:/(close|touch))?")
-VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL",
-                            PAGE.parent / ".tracetutor/voice/vosk-model-small-cn-0.22"))
+VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL", VOICE_CACHE / "vosk-model-small-cn-0.22"))
 AUDIO_RATE = 16000
 AUDIO_LIMIT = 12 * AUDIO_RATE * 2
 VOICE_SLOT = BoundedSemaphore(1)
+SPEECH_SLOT = BoundedSemaphore(1)
 voice_model = None
 logging.basicConfig(level=logging.INFO)
 
@@ -130,8 +134,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), display-capture=()")
         self.send_header("Content-Security-Policy",
-                         "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; "
-                         "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'")
+                         "default-src 'none'; script-src 'self' 'unsafe-inline' blob:; style-src 'unsafe-inline'; "
+                         "connect-src 'self'; img-src 'self' data:; media-src blob:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(payload)
@@ -155,6 +159,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_data(200, {
                 "ai": bool(os.getenv("DEEPSEEK_API_KEY")),
                 "voice": voice_available(),
+                "speech": pet_speech.available(),
                 "labs": [{"id": key, "title": lab["title"], "summary": lab["summary"],
                           "sample": sample(lab), "broken": sample(lab, broken=True)}
                          for key, lab in LABS.items()],
@@ -256,9 +261,36 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             VOICE_SLOT.release()
 
+    def pet_speech_request(self):
+        if self.headers.get_content_type() != "application/json":
+            return self.send_data(415, {"error": "请提交 JSON 格式的朗读文本。"})
+        try:
+            size = int(self.headers.get("Content-Length", 0))
+            if not 0 < size <= 4096:
+                return self.send_data(413, {"error": "朗读文本超出长度限制。"})
+            text = " ".join(json.loads(self.rfile.read(size))["text"].split())
+            if not 0 < len(text) <= 260 or not text.isprintable():
+                raise ValueError
+        except (ValueError, KeyError, TypeError, AttributeError, TimeoutError, RecursionError):
+            return self.send_data(400, {"error": "请输入 1 至 260 个字符的朗读文本。"})
+        if not pet_speech.available():
+            return self.send_data(503, {"error": "鲸鱼娘的专用语音暂未就绪。"})
+        if not SPEECH_SLOT.acquire(blocking=False):
+            return self.send_data(429, {"error": "鲸鱼娘正在生成语音，请稍后再听。"})
+        try:
+            audio = pet_speech.speak(text)
+        except Exception:
+            logging.exception("Could not generate character voice")
+            return self.send_data(503, {"error": "这次声音没有生成，请再点一次朗读。"})
+        finally:
+            SPEECH_SLOT.release()
+        return self.send_data(200, audio, "audio/mpeg")
+
     def do_POST(self):
         if self.path == "/api/pet/voice":
             return self.pet_voice_request()
+        if self.path == "/api/pet/speech":
+            return self.pet_speech_request()
         if self.path == "/api/pet/sessions":
             if self.headers.get_content_type() != "application/json":
                 return self.send_data(415, {"error": "请提交 JSON"})

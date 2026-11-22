@@ -42,6 +42,49 @@ const callClues = {
 const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
 const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本轮小结/;
 
+function registerVoiceCapture() {
+  class VoiceCapture extends AudioWorkletProcessor {
+    constructor() {
+      super();
+      this.samples = new Int16Array(sampleRate * 12);
+      this.offset = 0;
+      this.finished = false;
+      this.port.onmessage = () => this.finish();
+    }
+
+    finish() {
+      if (this.finished) return;
+      this.finished = true;
+      const audio = this.samples.slice(0, this.offset).buffer;
+      this.port.postMessage(audio, [audio]);
+    }
+
+    process(inputs) {
+      if (this.finished) return false;
+      const channel = inputs[0][0];
+      if (!channel) return true;
+      for (let i = 0; i < channel.length && this.offset < this.samples.length; i++) {
+        const sample = Math.max(-1, Math.min(1, channel[i]));
+        this.samples[this.offset++] = sample * (sample < 0 ? 32768 : 32767);
+      }
+      if (this.offset === this.samples.length) this.finish();
+      return !this.finished;
+    }
+  }
+
+  registerProcessor("trace-voice-capture", VoiceCapture);
+}
+
+async function loadVoiceCapture(context) {
+  const module = "(" + registerVoiceCapture.toString() + ")();";
+  const url = URL.createObjectURL(new Blob([module], {type: "text/javascript"}));
+  try {
+    await context.audioWorklet.addModule(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function setupPetVoice(input, message, resize, setVoicePose) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
@@ -49,7 +92,7 @@ function setupPetVoice(input, message, resize, setVoicePose) {
   const Audio = window.AudioContext || window.webkitAudioContext;
   const canRecord = Boolean(window.isSecureContext && Audio && window.AudioWorkletNode &&
     navigator.mediaDevices?.getUserMedia);
-  let listener, timeout, recording, useServer = false;
+  let listener, timeout, recording, playback, useServer = false;
   function note(text = "") {
     status.hidden = !text;
     status.textContent = text;
@@ -74,15 +117,21 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     active.abort();
     return true;
   }
-  read.disabled = !window.speechSynthesis || !window.SpeechSynthesisUtterance;
-  autoRead.disabled = read.disabled;
-  function enableServer(available) {
-    useServer = available && canRecord;
+  function enableServer(configuration) {
+    read.disabled = autoRead.disabled = !configuration?.speak;
+    read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
+    if (configuration === undefined) {
+      mic.disabled = true;
+      mic.title = "正在检查语音服务";
+      note("语音服务正在准备。");
+      return;
+    }
+    useServer = configuration.record && canRecord;
     mic.disabled = !useServer && !Recognition;
     mic.title = useServer ? "说完后点击结束，普通话在当前演示服务内转写"
       : Recognition ? "使用浏览器语音识别，转写后可确认发送" : "当前浏览器无法使用语音输入";
     if (mic.disabled) note("当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。");
-    else if (useServer) note();
+    else note();
   }
 
   function showTranscript(text) {
@@ -204,7 +253,7 @@ function setupPetVoice(input, message, resize, setVoicePose) {
         session.stream = stream;
         if (recording !== session) releaseAudio(session);
       });
-      await Promise.all([streamReady, context.resume(), context.audioWorklet.addModule("/pet/voice-capture.js")]);
+      await Promise.all([streamReady, context.resume(), loadVoiceCapture(context)]);
       if (recording !== session) return;
       const node = new AudioWorkletNode(context, "trace-voice-capture", {numberOfOutputs: 0});
       node.port.onmessage = event => transcribe(session, event.data);
@@ -236,28 +285,73 @@ function setupPetVoice(input, message, resize, setVoicePose) {
   mic.addEventListener("click", () => {
     if (recording?.phase === "listening") return finishRecording(recording);
     if (closeRecording()) return note("已取消语音输入。");
+    stopPlayback();
     if (useServer) startServerRecording();
     else startNative();
   });
-  function readReply(automatic = false) {
+
+  function stopPlayback() {
+    if (!playback) return false;
+    const current = playback;
+    playback = undefined;
+    clearTimeout(current.timer);
+    current.request.abort();
+    current.audio?.pause();
+    if (current.url) URL.revokeObjectURL(current.url);
+    read.textContent = "朗读回复";
+    setVoicePose(null);
+    resize();
+    return true;
+  }
+
+  async function readReply(automatic = false) {
     if (read.disabled || (automatic && !autoRead.checked) || !message.textContent) return;
-    const reply = new SpeechSynthesisUtterance(message.textContent);
-    reply.lang = "zh-CN";
-    speechSynthesis.cancel();
-    reply.onstart = () => setVoicePose("talk");
-    reply.onend = reply.onerror = () => setVoicePose(null);
-    speechSynthesis.speak(reply);
+    if (recording || listener) return;
+    if (stopPlayback() && !automatic) return note("已停止朗读。");
+    const request = new AbortController();
+    const narration = playback = {request, timer: setTimeout(() => request.abort(), 40000)};
+    read.textContent = "停止朗读";
+    note("鲸鱼娘正在准备语音。");
+    setVoicePose("focus");
+    try {
+      const response = await fetch("/api/pet/speech", {
+        method: "POST", signal: request.signal, headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text: message.textContent.slice(0, 260)})
+      });
+      if (response.redirected || !response.ok || !response.headers.get("content-type")?.startsWith("audio/mpeg")) {
+        const failure = await response.json().catch(() => null);
+        throw new Error(failure?.error || "鲸鱼娘的专用语音暂时连不上，请再点一次朗读。");
+      }
+      const clip = await response.blob();
+      if (playback !== narration) return;
+      clearTimeout(narration.timer);
+      narration.url = URL.createObjectURL(clip);
+      const audio = narration.audio = new window.Audio(narration.url);
+      audio.onplaying = () => {
+        if (playback !== narration) return;
+        note();
+        setVoicePose("talk");
+      };
+      audio.onended = () => { if (playback === narration) stopPlayback(); };
+      await audio.play();
+    } catch (error) {
+      if (playback !== narration) return;
+      stopPlayback();
+      note(error.name === "NotAllowedError" ? "请点击「朗读回复」，允许浏览器播放声音。"
+        : error.name === "AbortError" ? "生成语音超时，请再点一次朗读。"
+        : error.message || "暂时无法播放，请重试。");
+    }
   }
   read.addEventListener("click", () => readReply());
   function stop() {
     const hadRecording = closeRecording();
     if (stopListening() || hadRecording) note();
-    if (!read.disabled) speechSynthesis.cancel();
+    if (stopPlayback()) note();
     setVoicePose(null);
   }
   window.addEventListener("pagehide", stop);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
-  enableServer(false);
+  enableServer();
   return {stop, readReply, enableServer};
 }
 
@@ -309,6 +403,7 @@ function makeCompanion(activeLab, openResult) {
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const input = byId("pet-input");
   const quickStudy = byId("quick-study"), restore = byId("pet-restore");
+  const quickVoice = quickStudy.querySelector('[data-study="voice"]');
   const motion = byId("pet-motion"), proactive = byId("pet-proactive");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const greeting = bubble.textContent;
@@ -319,7 +414,8 @@ function makeCompanion(activeLab, openResult) {
   };
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
-  let poseTimer, voicePose, greeted = false, pendingBubble, activityIndex = 0;
+  let poseTimer, voicePose, greeted = false, pendingBubble, activityIndex = 0, hoverIndex = 0;
+  let hoverActive = false;
   let lastInteraction = performance.now();
   let view = "grade", visibleEvents, selectedEvent;
   const memory = makeStudyMemory(), memoryStatus = byId("pet-memory-status");
@@ -364,6 +460,7 @@ function makeCompanion(activeLab, openResult) {
 
   function setPose(pose, duration = 0) {
     clearTimeout(poseTimer);
+    if (pose !== "look") clearHoverGaze();
     avatar.dataset.pose = pose;
     applySheet();
     if (duration) poseTimer = setTimeout(updateAppearance, duration);
@@ -459,7 +556,7 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function patrol() {
-    if (document.hidden || avatar.hidden || !panel.hidden || drag ||
+    if (document.hidden || avatar.hidden || !panel.hidden || drag || hoverActive ||
       byId("appearance").open || byId("editor-settings").open) return;
     if (!greeted) greet();
     if (pendingBubble && greeted) announce(pendingBubble);
@@ -713,11 +810,37 @@ function makeCompanion(activeLab, openResult) {
     moved = false;
     drag = {id: event.pointerId, x: event.clientX, y: event.clientY, left, top, active: false};
   });
-  avatar.addEventListener("pointerenter", () => {
-    if (!drag && panel.hidden && motion.checked && !reducedMotion.matches && !avatar.dataset.roaming) {
-      setPose("greet", 1450);
+  function clearHoverGaze() {
+    delete avatar.dataset.gaze;
+    avatar.style.removeProperty("--gaze-frame");
+  }
+
+  function followPointer(event) {
+    if (avatar.dataset.gaze !== "pointer" || drag) return;
+    const {left, width} = avatar.getBoundingClientRect();
+    const ratio = (event.clientX - left) / width;
+    const facing = avatar.dataset.facing === "left" ? 1 - ratio : ratio;
+    const frame = facing < .37 ? 6 : facing > .63 ? 2 : 0;
+    avatar.style.setProperty("--gaze-frame", (frame / 7 * 100) + "%");
+  }
+
+  avatar.addEventListener("pointerenter", event => {
+    if (event.pointerType !== "mouse" || drag || !panel.hidden || !motion.checked ||
+        reducedMotion.matches || avatar.dataset.roaming) return;
+    const reactions = [["greet", 1450], ["look", 2400], ["play", 1050], ["sit", 2300]];
+    const [pose, duration] = reactions[hoverIndex++ % reactions.length];
+    hoverActive = true;
+    setPose(pose, duration);
+    if (pose === "look") {
+      avatar.dataset.gaze = "pointer";
+      followPointer(event);
     }
   });
+  avatar.addEventListener("pointerleave", () => {
+    hoverActive = false;
+    clearHoverGaze();
+  });
+  avatar.addEventListener("pointermove", followPointer);
   window.addEventListener("pointermove", event => {
     if (!drag || drag.id !== event.pointerId) return;
     const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
@@ -853,11 +976,18 @@ function makeCompanion(activeLab, openResult) {
     }
   });
   startPatrol();
-  return {update, observe, explain, recordRun, enableVoice: voice.enableServer};
+  function enableVoice(available) {
+    voice.enableServer(available);
+    quickVoice.disabled = byId("pet-mic").disabled;
+    quickVoice.title = byId("pet-mic").title;
+  }
+  avatar.disabled = false;
+  for (const control of quickStudy.querySelectorAll('button:not([data-study="voice"])')) control.disabled = false;
+  return {update, observe, explain, recordRun, enableVoice};
 }
 
 companion = makeCompanion(() => select.value, openPetResult);
-companion.enableVoice(serverVoice);
+companion.enableVoice(voiceConfig);
 companion.update(petSnapshot(record));
 companion.observe("grade");
 window.addEventListener("pageshow", event => {

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TraceTutor——操作系统实验评测与智能诊断平台</title>
 <link rel="icon" href="/pet/whale-girl.png" type="image/png">
+<link rel="preload" href="/pet/companion.js" as="script">
 <style>
 :root {
   color-scheme: light;
@@ -31,7 +32,7 @@
   --editor-paper: #f2f3f8; --backdrop: #e2e6f2; --pattern: rgba(64, 76, 121, .13);
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100dvh; color: var(--ink); background: var(--canvas); font: 16px/1.55 system-ui, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+body { margin: 0; min-height: 100dvh; color: var(--ink); background: var(--canvas); font: 18px/1.5 system-ui, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
 body[data-backdrop="grid"] {
   background-image: linear-gradient(105deg, var(--backdrop), transparent 74%),
     linear-gradient(var(--pattern) 1px, transparent 1px), linear-gradient(90deg, var(--pattern) 1px, transparent 1px);
@@ -53,6 +54,8 @@ body[data-backdrop="custom"] {
   background-attachment: fixed;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
+input::file-selector-button { font: inherit; }
+small, sub, sup { font-size: 1em; }
 button, select, a { -webkit-tap-highlight-color: transparent; }
 button, select { cursor: pointer; }
 button:disabled { opacity: .55; cursor: wait; }
@@ -62,28 +65,30 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 a { color: var(--indigo); }
 [hidden] { display: none !important; }
 header { background: var(--paper); border-bottom: 1px solid var(--line); }
-.bar, main { max-width: 1740px; margin: auto; padding-inline: clamp(18px, 2.8vw, 50px); }
-.bar { min-height: 68px; display: flex; flex-wrap: wrap; align-items: center; column-gap: 24px; }
-.brand { display: flex; align-items: center; gap: 11px; font-weight: 750; font-size: 20px; letter-spacing: -.025em; }
-.mark { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--indigo); color: white; font: 600 14px var(--mono); }
+.bar, main { max-width: 1920px; margin: auto; padding-inline: clamp(16px, 2.35vw, 44px); }
+.bar { min-height: 72px; display: flex; flex-wrap: wrap; align-items: center; column-gap: 22px; }
+.brand { display: flex; align-items: center; gap: 11px; font-weight: 750; font-size: 22px; letter-spacing: -.025em; }
+.mark { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; background: var(--indigo); color: white; font: 600 18px var(--mono); }
 nav { display: flex; gap: 22px; align-self: stretch; }
 .tab { border: 0; border-bottom: 2px solid transparent; background: transparent; padding: 0 2px; min-height: 41px; color: var(--muted); white-space: nowrap; }
 .tab[aria-pressed="true"] { border-bottom-color: var(--indigo); color: var(--indigo); font-weight: 680; }
 .tab:hover { color: var(--indigo); }
-.quote { margin: 0 0 0 auto; max-width: 37ch; color: var(--muted); font-size: 14px; line-height: 1.4; text-align: right; }
-.quote a { display: block; text-decoration: none; font-weight: 650; }
+.quote { flex: 1 1 18rem; min-width: 0; margin: 0 0 0 auto; overflow-x: auto;
+  overscroll-behavior-inline: contain; color: var(--muted); line-height: 1.5; }
+.quote-line { display: block; width: max-content; margin-inline-start: auto; white-space: nowrap; }
+.quote a { display: block; text-align: end; text-decoration: none; font-weight: 650; }
 .quote a:hover { text-decoration: underline; }
 .header-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-main { padding-block: 24px 56px; }
+main { padding-block: 22px 36px; }
 h1, h2, h3, p { margin: 0; }
-h1 { font-size: 36px; line-height: 1.2; letter-spacing: -.035em; }
-h2 { font-size: 19px; letter-spacing: -.015em; }
-h3 { font-size: 17px; }
+h1 { font-size: 40px; line-height: 1.2; letter-spacing: -.035em; }
+h2 { font-size: 22px; letter-spacing: -.015em; }
+h3 { font-size: 20px; }
 .intro { display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 12px; margin-bottom: 15px; }
 .intro p { color: var(--muted); margin-top: 5px; }
 .labbar { display: flex; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 15px; background: var(--paper); margin-bottom: 14px; }
 select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px; background: var(--paper); padding: 7px 10px; }
-#summary { color: var(--muted); font-size: 15px; }
+#summary { color: var(--muted); }
 .grid { display: grid; grid-template-columns: minmax(0, 1.14fr) minmax(0, 1fr); gap: 14px; align-items: stretch; }
 .panel { min-width: 0; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }
 .grid > .panel { display: flex; flex-direction: column; height: clamp(450px, 73dvh, 760px); }
@@ -93,33 +98,33 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .panel-head { border-bottom: 1px solid var(--line); }
 .panel-foot { border-top: 1px solid var(--line); }
 .tool-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.button { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); font-size: 14px; }
+.button { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink); }
 .button:hover:not(:disabled) { background: var(--soft); }
-.primary { background: var(--indigo); color: white; border-color: var(--indigo); padding: 8px 14px; font-size: 15px; font-weight: 650; }
+.primary { background: var(--indigo); color: white; border-color: var(--indigo); padding: 8px 14px; font-weight: 650; }
 .primary:hover:not(:disabled) { background: color-mix(in srgb, var(--indigo) 89%, black); }
 .editor { display: flex; background: var(--editor-paper); min-height: 0; flex: 1; }
 #numbers { color: var(--muted); background: var(--soft); margin: 0; padding: 13px 10px; overflow: hidden; text-align: right; min-width: 38px; border-right: 1px solid var(--line); user-select: none; }
-#source, #numbers { font: var(--editor-size, 15px)/1.65 var(--editor-font); tab-size: var(--editor-tab); }
+#source, #numbers { font: var(--editor-size, 18px)/1.58 var(--editor-font); tab-size: var(--editor-tab); }
 #source { width: 100%; flex: 1; min-width: 0; background: transparent; padding: 13px 14px; border: 0; resize: none; white-space: pre; }
 .editor[data-wrap="true"] #source { white-space: pre-wrap; overflow-wrap: anywhere; }
 .editor[data-wrap="true"] #numbers { display: none; }
 .editor[data-tone="neutral"] { background: #fafafa; }
 .editor[data-tone="wash"] { background: var(--soft); }
-.status { padding: 3px 8px; font-size: 13px; font-weight: 650; border-radius: 6px; background: var(--soft); color: var(--indigo); }
+.status { padding: 3px 8px; font-weight: 650; border-radius: 6px; background: var(--soft); color: var(--indigo); }
 .status.good { background: var(--teal-bg); color: var(--teal); }
 .status.warn { background: var(--amber-bg); color: var(--amber); }
 .result-nav { padding-inline: 17px; border-bottom: 1px solid var(--line); }
 #contents { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
 .empty { display: grid; min-height: min(100%, 220px); align-content: center; justify-items: center; text-align: center; gap: 8px; padding: 26px 14px; }
-.empty p, .muted { color: var(--muted); font-size: 14px; }
-.empty-mark { width: 46px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); color: var(--indigo); font: 16px var(--mono); margin-bottom: 5px; }
+.empty p, .muted { color: var(--muted); }
+.empty-mark { width: 46px; height: 40px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--soft); color: var(--indigo); font: 20px var(--mono); margin-bottom: 5px; }
 .finding { padding: 13px 14px; border-radius: 9px; background: var(--soft); margin-bottom: 13px; }
 .finding.warn { background: var(--amber-bg); }
-.finding p { margin-top: 3px; font-size: 15px; }
+.finding p { margin-top: 3px; }
 .finding button { margin-top: 8px; }
 .case { padding: 10px 1px; border-bottom: 1px solid var(--line); }
 .case summary, .hint summary { cursor: pointer; font-weight: 630; }
-.case pre, .event pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 14px/1.55 var(--mono); margin: 6px 0; }
+.case pre, .event pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; font: 18px/1.55 var(--mono); margin: 6px 0; }
 .case pre { background: var(--canvas); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 200px; overflow: auto; }
 .case .muted { display: inline-block; margin-top: 6px; }
 .trace-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
@@ -127,21 +132,21 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .event-list { max-height: 405px; overflow: auto; }
 .event { border-bottom: 1px solid var(--line); padding: 8px 7px; min-width: 0; }
 .event.evidence { outline: 1px solid var(--line); outline-offset: -1px; background: var(--soft); }
-.event small { color: var(--muted); font: 13px var(--mono); overflow-wrap: anywhere; }
+.event small { color: var(--muted); font: 18px var(--mono); overflow-wrap: anywhere; }
 .event-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 5px; }
-.event-heading button { padding: 3px 7px; font-size: 12px; }
+.event-heading button { padding: 3px 7px; }
 .event pre { margin-bottom: 0; }
 .pager { margin-top: 12px; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
 .hint { padding: 13px 0; border-bottom: 1px solid var(--line); }
 .hint p { padding: 8px 0 0; color: var(--muted); }
 .notice { color: var(--amber); margin-top: 11px; overflow-wrap: anywhere; }
-.ai-option { color: var(--muted); font-size: 14px; }
-.preferences { width: min(360px, calc(100vw - 24px)); padding: 15px; color: var(--ink);
+.ai-option { color: var(--muted); }
+.preferences { width: min(420px, calc(100vw - 24px)); padding: 15px; color: var(--ink);
   background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 38px #25395524; }
 .preferences h2 { margin-bottom: 9px; }
 .preferences label { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-block: 7px; }
 .preferences select { min-width: 143px; }
-.preferences input[type="file"] { max-width: 100%; font-size: 14px; }
+.preferences input[type="file"] { max-width: 100%; }
 .preferences .file-label { display: block; }
 #background-note { margin-block: 4px 9px; }
 .preferences .close-preferences { display: flex; justify-content: flex-end; padding-top: 8px; }
@@ -155,19 +160,20 @@ select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px
 .comparison-entry { border: 1px solid var(--line); border-radius: 8px; padding: 11px; }
 .comparison-entry p { margin: 5px 0; }
 .comparison-entry button { margin: 6px 6px 0 0; }
-.comparison-cases { padding-left: 20px; margin: 8px 0; font-size: 13px; }
+.comparison-cases { padding-left: 20px; margin: 8px 0; }
 .comparison-cases li + li { margin-top: 4px; }
 @media (max-width: 540px) { .comparison-grid { grid-template-columns: 1fr; } }
 table { border-collapse: collapse; width: 100%; text-align: left; }
 th, td { white-space: nowrap; padding: 10px 17px; border-bottom: 1px solid var(--line); }
 th { background: var(--canvas); color: var(--muted); font-weight: 620; }
-td code { font: 12px var(--mono); }
+td code { font: 18px var(--mono); }
 .pet-launch { --pet-edge: 14px; --pet-bottom: 8px; --pet-size: clamp(124px, 19dvh, 205px);
   position: fixed; z-index: 3; left: calc(100% - var(--pet-edge) - var(--pet-size));
   top: calc(100% - var(--pet-bottom) - var(--pet-size)); width: var(--pet-size); height: var(--pet-size);
   display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent;
   cursor: grab; touch-action: none; user-select: none; }
 .pet-launch.dragging { cursor: grabbing; }
+.pet-launch:disabled { opacity: 1; }
 .pet-figure { display: block; width: 100%; height: 100%; pointer-events: none;
   --row: 0%; --cycle: 2.6s;
   background: url("/pet/whale-stand.webp?v=2") center / contain no-repeat;
@@ -192,6 +198,9 @@ td code { font: 12px var(--mono); }
 @media (prefers-reduced-motion: no-preference) {
   .pet-launch[data-roaming="true"] { transition: left 1.85s ease-in-out, top 1.85s ease-in-out; }
   .pet-launch[data-motion="true"][data-sheet] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
+  .pet-launch[data-motion="true"][data-sheet="actions"][data-gaze="pointer"] .pet-figure {
+    animation: none; background-position-x: var(--gaze-frame, 0%);
+  }
   .pet-launch[data-motion="true"]:not([data-sheet])[data-pose="stand"] .pet-figure {
     animation: pet-breathe 2.8s ease-in-out infinite;
   }
@@ -211,47 +220,47 @@ td code { font: 12px var(--mono); }
 @keyframes pet-hello { 20%, 70% { rotate: -7deg; translate: 0 -5px; } 45% { rotate: 5deg; } }
 @keyframes pet-step { 50% { translate: 0 -7px; rotate: 3deg; } }
 @keyframes pet-breathe { 50% { translate: 0 -2px; } }
-.pet-panel { position: fixed; z-index: 4; width: min(390px, calc(100vw - 24px));
+.pet-panel { position: fixed; z-index: 4; width: min(425px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px); overflow: auto; overscroll-behavior: contain;
   padding: 15px; border: 1px solid var(--line); border-radius: 17px;
   background: var(--paper); box-shadow: 0 10px 28px oklch(.30 .05 266 / .16); }
-.pet-bubble { position: fixed; z-index: 2; width: min(290px, calc(100vw - 24px));
+.pet-bubble { position: fixed; z-index: 2; width: min(312px, calc(100vw - 24px));
   padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
-  box-shadow: 0 4px 18px oklch(.30 .05 266 / .10); font-size: 15px; pointer-events: none; }
+  box-shadow: 0 4px 18px oklch(.30 .05 266 / .10); pointer-events: none; }
 .pet-bubble:not([style]) { right: 15px; bottom: min(calc(19dvh + 17px), 224px); }
 .pet-head, .pet-form { display: flex; align-items: center; gap: 8px; }
 .pet-head { justify-content: space-between; }
 .pet-head h2 { margin: 0; }
-.pet-reply { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; font-size: 15px; }
+.pet-reply { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
 .pet-panel .tool-row { margin-bottom: 10px; }
 .pet-form input { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px; }
 .pet-form button { flex: none; }
 .pet-voice { margin: 8px 0 0; }
 .pet-voice .tool-row { margin-bottom: 3px; }
-.pet-voice label { font-size: 14px; }
 .pet-quiz { margin: 10px 0; padding: 0; border: 0; min-width: 0; }
-.pet-quiz legend { font-weight: 650; font-size: 14px; margin-bottom: 6px; padding: 0; }
+.pet-quiz legend { font-weight: 650; margin-bottom: 6px; padding: 0; }
 .pet-quiz button { display: flex; width: 100%; margin-bottom: 5px; text-align: left; }
 .pet-quiz button:disabled { cursor: default; }
 .pet-help { margin-top: 9px; }
 .pet-controls { display: flex; flex-wrap: wrap; gap: 12px; }
 .preferences::backdrop { background: #26395640; }
-@media (max-width: 1060px) { .quote { max-width: 24ch; } }
+@media (max-width: 1120px) {
+  .quote { order: 1; margin: 0; flex-basis: 100%; padding-bottom: 8px; }
+  .quote-line { margin-inline-start: 0; }
+  .header-tools { margin-left: auto; }
+}
 @media (max-width: 850px) {
   .grid { grid-template-columns: 1fr; }
   .editor { height: 370px; flex: none; }
   .bar, main { padding-inline: 20px; }
   .grid > .panel { height: auto; }
   #contents { min-height: 230px; }
-  .quote { order: 1; margin: 0; flex-basis: 100%; max-width: none; padding-bottom: 8px; text-align: left; }
-  .quote a { display: inline; }
-  .header-tools { margin-left: auto; }
 }
 @media (max-width: 540px) {
   .bar { column-gap: 14px; padding-top: 8px; }
   .bar > nav { order: 2; width: 100%; }
   main { padding-top: 23px; }
-  h1 { font-size: 28px; }
+  h1 { font-size: 32px; }
   .labbar { flex-wrap: wrap; gap: 5px; }
   .panel-head, .panel-foot, #contents { padding-inline: 13px; }
   .pet-launch { --pet-size: clamp(104px, 15dvh, 146px); --pet-edge: 8px; }
@@ -266,7 +275,9 @@ td code { font: 12px var(--mono); }
     <button type="button" class="tab" id="work-tab" aria-pressed="true">实验工作台</button>
     <button type="button" class="tab" id="history-tab" aria-pressed="false">实验记录</button>
   </nav>
-  <blockquote class="quote" id="quote" hidden><span id="quote-text"></span><a id="quote-source" target="_blank" rel="noopener noreferrer"></a></blockquote>
+  <blockquote class="quote" id="quote" tabindex="0" aria-label="计算机名人引语" hidden>
+    <span class="quote-line"><span id="quote-text"></span><a id="quote-source" target="_blank" rel="noopener noreferrer"></a></span>
+  </blockquote>
   <div class="header-tools">
     <button type="button" class="button" id="appearance-open">外观设置</button>
     <button type="button" class="button" id="pet-restore" hidden>显示助教</button>
@@ -277,10 +288,10 @@ td code { font: 12px var(--mono); }
   <div class="intro">
     <div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div>
     <div class="quick-study" id="quick-study" aria-label="助教学习工具" role="group">
-      <button class="button" type="button" data-study="chat">问助教</button>
-      <button class="button" type="button" data-study="voice">语音提问</button>
-      <button class="button" type="button" data-study="quiz">概念小测</button>
-      <button class="button" type="button" data-study="progress">学习进度</button>
+      <button class="button" type="button" data-study="chat" disabled>问助教</button>
+      <button class="button" type="button" data-study="voice" disabled>语音提问</button>
+      <button class="button" type="button" data-study="quiz" disabled>概念小测</button>
+      <button class="button" type="button" data-study="progress" disabled>学习进度</button>
     </div>
   </div>
   <div class="labbar">
@@ -332,7 +343,7 @@ td code { font: 12px var(--mono); }
 <dialog class="preferences" id="editor-settings" aria-labelledby="editor-settings-title">
   <h2 id="editor-settings-title">代码样式</h2>
   <label for="editor-font">等宽字体 <select id="editor-font"><option value="system">系统等宽</option><option value="consolas">Consolas</option><option value="courier">Courier New</option></select></label>
-  <label for="editor-size">字号 <select id="editor-size"><option value="14">14 px</option><option value="15" selected>15 px</option><option value="17">17 px</option><option value="19">19 px</option></select></label>
+  <label for="editor-size">字号 <select id="editor-size"><option value="18" selected>18 px</option><option value="20">20 px</option><option value="22">22 px</option><option value="24">24 px</option></select></label>
   <label for="editor-tone">编辑区底色 <select id="editor-tone"><option value="theme">跟随主题</option><option value="neutral">纯白</option><option value="wash">柔和色</option></select></label>
   <label for="editor-tab">制表符宽度 <select id="editor-tab"><option value="2">2 字符</option><option value="4" selected>4 字符</option><option value="8">8 字符</option></select></label>
   <label for="editor-wrap">自动换行 <input type="checkbox" id="editor-wrap"></label>
@@ -340,7 +351,7 @@ td code { font: 12px var(--mono); }
   <form class="close-preferences" method="dialog"><button class="button" type="submit">完成</button></form>
 </dialog>
 <button id="pet-launch" class="pet-launch" type="button" aria-label="鲸鱼娘助教" aria-controls="pet-panel"
-  aria-expanded="false" data-motion="true" data-pose="greet" title="鲸鱼娘助教 · 点击打开，可拖动">
+  aria-expanded="false" data-motion="true" data-pose="greet" title="鲸鱼娘助教 · 点击打开，可拖动" disabled>
   <span class="pet-figure" aria-hidden="true"></span>
 </button>
 <p id="pet-bubble" class="pet-bubble" role="status">嗨，我是鲸鱼娘助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
@@ -387,7 +398,7 @@ const labels = {
 };
 let labs = [], record, tab = "grade", polling = false, caseIndex = 0, onlyEvidence = false, viewVersion = 0;
 let historyVersion = 0, pair = [];
-let companion, serverVoice = false;
+let companion, voiceConfig;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -810,11 +821,15 @@ api("/api/labs").then(data => {
     byId("filter").append(option.cloneNode(true));
   }
   byId("ai").disabled = !data.ai;
-  serverVoice = data.voice === true;
-  companion?.enableVoice(serverVoice);
+  voiceConfig = {record: data.voice === true, speak: data.speech === true};
+  companion?.enableVoice(voiceConfig);
   if (!data.ai) byId("ai").parentElement.title = "配置模型凭据后可启用，当前使用规则提示";
   loadExample(true);
-}).catch(err => notice(err.message));
+}).catch(err => {
+  voiceConfig = {record: false, speak: false};
+  companion?.enableVoice(voiceConfig);
+  notice(err.message);
+});
 </script>
 <script src="/pet/companion.js" defer></script>
 </body>
