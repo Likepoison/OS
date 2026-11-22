@@ -87,8 +87,8 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
     useServer = configuration.record && canRecord;
     mic.disabled = !useServer && !Recognition;
-    mic.title = useServer ? "语音输入 · Ctrl + Alt + M。普通话在当前演示服务内转写"
-      : Recognition ? "语音输入 · Ctrl + Alt + M。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
+    mic.title = useServer ? "按住 T 录音，松开转写。普通话在当前演示服务内转写"
+      : Recognition ? "按住 T 录音，松开转写。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
     if (mic.disabled) note("当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。");
     else note();
     const waiting = pendingReply;
@@ -103,17 +103,37 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     input.focus();
   }
 
-  function startNative() {
+  function finishNative() {
+    if (!listener || mic.textContent !== "停止聆听") return;
+    listener.stop();
+    if (listener) micState("取消转写", "focus");
+  }
+
+  function startNative(held) {
     const active = new Recognition();
     listener = active;
+    let text = "", ended = false, released = !held;
     active.lang = "zh-CN";
     active.interimResults = false;
-    active.continuous = false;
-    active.onresult = event => {
-      if (listener !== active) return;
-      const text = event.results[event.resultIndex]?.[0]?.transcript.trim();
+    active.continuous = held;
+    function complete() {
       clearListener();
       showTranscript(text);
+    }
+    function release() {
+      if (listener !== active || released) return;
+      released = true;
+      clearTimeout(timeout);
+      if (ended) return complete();
+      finishNative();
+      if (listener === active) timeout = setTimeout(() => {
+        if (stopListening()) note("语音转写超时，请再试一次。");
+      }, 2500);
+    }
+    active.onresult = event => {
+      if (listener !== active) return;
+      text = Array.from(event.results, result => result[0].transcript).join("").trim();
+      if (!held) complete();
     };
     active.onerror = event => {
       if (listener !== active) return;
@@ -128,20 +148,22 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     };
     active.onend = () => {
       if (listener !== active) return;
-      clearListener();
-      note("没有收到转写，可以重试或打字。");
+      ended = true;
+      if (released) complete();
     };
     try {
       active.start();
       micState("停止聆听", "listen");
-      note("浏览器正在识别普通话。转写后请确认发送。");
+      note(held ? "正在听。说完松开 T，最多 12 秒。" : "浏览器正在识别普通话。转写后请确认发送。");
       timeout = setTimeout(() => {
-        if (stopListening()) note("本轮语音输入已结束，可以重试或打字。");
+        if (held && !released) release();
+        else if (stopListening()) note("本轮语音输入已结束，可以重试或打字。");
       }, 12000);
     } catch {
       clearListener();
       note("无法启动浏览器语音识别，可以继续打字。");
     }
+    if (held && listener === active) return release;
   }
 
   function releaseAudio(session) {
@@ -202,7 +224,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
   }
 
-  async function startServerRecording() {
+  async function startServerRecording(held) {
     const session = recording = {request: new AbortController(), phase: "permission"};
     try {
       micState("取消录音", "listen");
@@ -226,7 +248,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
-      note("正在听。说完再按 Ctrl + Alt + M 或点「结束并转写」，最多 12 秒。");
+      note(held ? "正在听。说完松开 T，最多 12 秒。" : "正在听。说完点「结束并转写」，最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
       if (recording !== session) return;
@@ -244,19 +266,27 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     if (recording?.phase === "listening") return finishRecording(recording);
     if (closeRecording()) return note("已取消语音输入。");
     if (listener) {
-      if (mic.textContent === "停止聆听") {
-        listener.stop();
-        if (listener) micState("取消转写", "focus");
-      } else if (stopListening()) note("已取消语音输入。");
+      if (mic.textContent === "停止聆听") finishNative();
+      else if (stopListening()) note("已取消语音输入。");
       return;
     }
-    stopPlayback();
-    if (useServer) startServerRecording();
-    else startNative();
+    startInput(false);
   });
 
-  function toggleShortcut() {
-    if ((!recording || recording.phase === "listening") && mic.textContent !== "取消转写") mic.click();
+  function startInput(held) {
+    if (mic.disabled || recording || listener) return;
+    stopPlayback();
+    if (!useServer) return startNative(held);
+    startServerRecording(held);
+    const session = recording;
+    if (!held || !session) return;
+    return () => {
+      if (recording !== session) return;
+      if (session.phase === "permission") {
+        closeRecording();
+        note("麦克风还在开启。允许麦克风后，再按住 T 说话。");
+      } else finishRecording(session);
+    };
   }
 
   function stopPlayback(keepCaption = false) {
@@ -349,7 +379,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   window.addEventListener("pagehide", stop);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
   enableServer();
-  return {stop, readReply, enableServer, toggleShortcut};
+  return {stop, readReply, enableServer, startInput};
 }
 
 function makeStudyMemory() {
@@ -411,6 +441,7 @@ function makeCompanion(activeLab, openResult) {
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const form = byId("pet-form"), input = byId("pet-input");
   const send = form.querySelector('button[type="submit"]');
+  let holdTimer, releaseVoice;
   const quickStudy = byId("quick-study"), restore = byId("pet-restore");
   const quickVoice = quickStudy.querySelector('[data-study="voice"]');
   const motion = byId("pet-motion"), proactive = byId("pet-proactive");
@@ -680,6 +711,7 @@ function makeCompanion(activeLab, openResult) {
       place(panel);
       if (focus) byId("pet-title").focus();
     } else {
+      clearVoiceHold();
       voice.stop();
       if (focus && !avatar.hidden) avatar.focus();
     }
@@ -954,17 +986,50 @@ function makeCompanion(activeLab, openResult) {
     if (manuallyPlaced && position) move(position.x, position.y);
     else goHome();
   });
+  function clearVoiceHold() {
+    clearTimeout(holdTimer);
+    holdTimer = undefined;
+    const end = releaseVoice;
+    releaseVoice = undefined;
+    return end;
+  }
+
+  function cancelVoiceHold() {
+    if (clearVoiceHold()) voice.stop();
+  }
+
+  function canHoldVoice() {
+    const focused = document.activeElement;
+    return !avatar.hidden && !quickVoice.disabled && !document.hidden &&
+      !document.querySelector("dialog[open]") &&
+      !focused?.isContentEditable && !focused?.closest("input:not([type=checkbox], [type=radio]), textarea, select, [role=textbox]");
+  }
+
   document.addEventListener("keydown", event => {
     lastInteraction = performance.now();
-    if (event.defaultPrevented || event.isComposing || document.querySelector("dialog[open]")) return;
-    if (event.key === "Escape" && !panel.hidden) setOpen(false);
-    if (event.code !== "KeyM" || !event.ctrlKey || !event.altKey || event.shiftKey || event.metaKey ||
-        event.getModifierState("AltGraph") || avatar.hidden || quickVoice.disabled) return;
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || document.querySelector("dialog[open]")) return;
+    if (event.key === "Escape") {
+      if (!panel.hidden) setOpen(false);
+      else cancelVoiceHold();
+      return;
+    }
+    if (event.code !== "KeyT" || event.ctrlKey || event.altKey || event.shiftKey || event.metaKey || !canHoldVoice()) return;
     event.preventDefault();
-    if (event.repeat) return;
-    if (panel.hidden) setOpen(true, false);
-    voice.toggleShortcut();
+    if (event.repeat || holdTimer !== undefined || releaseVoice) return;
+    holdTimer = setTimeout(() => {
+      holdTimer = undefined;
+      if (!canHoldVoice()) return;
+      if (panel.hidden) setOpen(true, false);
+      releaseVoice = voice.startInput(true);
+    }, 300);
   });
+  document.addEventListener("keyup", event => {
+    if (event.code !== "KeyT" || (holdTimer === undefined && !releaseVoice)) return;
+    event.preventDefault();
+    const finish = clearVoiceHold();
+    finish?.();
+  });
+  window.addEventListener("blur", cancelVoiceHold);
   document.addEventListener("pointerdown", () => { lastInteraction = performance.now(); }, {passive: true});
   motion.addEventListener("change", () => {
     avatar.dataset.motion = String(motion.checked);
@@ -1040,6 +1105,7 @@ function makeCompanion(activeLab, openResult) {
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {
+    cancelVoiceHold();
     clearInterval(patrolTimer);
     cancelArtwork();
     stopRoaming();
@@ -1066,6 +1132,7 @@ function makeCompanion(activeLab, openResult) {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
+      cancelVoiceHold();
       clearInterval(patrolTimer);
       cancelArtwork();
       stopRoaming();

@@ -288,7 +288,7 @@ td code { font: 18px var(--mono); }
     <div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div>
     <div class="quick-study" id="quick-study" aria-label="助教学习工具" role="group">
       <button class="button" type="button" data-study="chat" disabled>问助教</button>
-      <button class="button" type="button" data-study="voice" aria-keyshortcuts="Control+Alt+M" disabled>语音提问</button>
+      <button class="button" type="button" data-study="voice" aria-keyshortcuts="T" disabled>语音提问</button>
       <button class="button" type="button" data-study="quiz" disabled>概念小测</button>
       <button class="button" type="button" data-study="progress" disabled>学习进度</button>
     </div>
@@ -364,12 +364,12 @@ td code { font: 18px var(--mono); }
   <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问鲸鱼娘" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
   <div class="pet-voice">
-    <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false" aria-keyshortcuts="Control+Alt+M">语音输入</button>
+    <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false" aria-keyshortcuts="T">语音输入</button>
       <button id="pet-read" class="button" type="button">朗读回复</button>
       <label><input type="checkbox" id="pet-autoread" checked> 自动朗读</label></div>
     <p id="pet-voice-status" class="muted" role="status" hidden></p>
   </div>
-  <p class="muted pet-help">可拖动桌宠，聚焦后可用方向键移动。Ctrl + Alt + M 开始或结束语音输入，Esc 收起。</p>
+  <p class="muted pet-help">焦点在输入框外时，按住 T 录音，松开转写。可用方向键移动桌宠，Esc 收起。</p>
   <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
     <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
 </aside>
