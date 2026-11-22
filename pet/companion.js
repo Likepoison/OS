@@ -50,7 +50,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   const format = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
     .find(type => Recorder?.isTypeSupported(type));
   const canRecord = Boolean(window.isSecureContext && format && navigator.mediaDevices?.getUserMedia);
-  let listener, timeout, recording, playback, useServer = false;
+  let listener, timeout, recording, playback, pendingReply, speechReady = false, useServer = false;
   function note(text = "") {
     status.hidden = !text;
     status.textContent = text;
@@ -76,6 +76,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     return true;
   }
   function enableServer(configuration) {
+    speechReady = configuration !== undefined;
     read.disabled = autoRead.disabled = !configuration?.speak;
     read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
     if (configuration === undefined) {
@@ -90,6 +91,9 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       : Recognition ? "语音输入 · Ctrl + Alt + M。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
     if (mic.disabled) note("当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。");
     else note();
+    const waiting = pendingReply;
+    pendingReply = undefined;
+    if (waiting && waiting === message.textContent) readReply(true);
   }
 
   function showTranscript(text) {
@@ -272,8 +276,12 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   }
 
   async function readReply(automatic = false) {
-    if (read.disabled || (automatic && !autoRead.checked) || !message.textContent) return;
-    if (recording || listener) return;
+    if ((automatic && !autoRead.checked) || !message.textContent || recording || listener) return;
+    if (!speechReady) {
+      if (automatic) pendingReply = message.textContent;
+      return;
+    }
+    if (read.disabled) return;
     if (stopPlayback() && !automatic) return note("已停止朗读。");
     const text = message.textContent.slice(0, 260);
     const characters = Array.from(text);
@@ -331,6 +339,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   }
   read.addEventListener("click", () => readReply());
   function stop() {
+    pendingReply = undefined;
     const hadRecording = closeRecording();
     if (stopListening() || hadRecording) note();
     if (stopPlayback()) note();

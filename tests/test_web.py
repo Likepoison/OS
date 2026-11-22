@@ -305,10 +305,7 @@ class Demo(TestCase):
                         mobile.close()
                     cloud_voice = context.new_page()
                     try:
-                        def voice_configuration(route):
-                            config = route.fetch().json()
-                            config["voice"] = True
-                            route.fulfill(json=config)
+                        pending_config = []
 
                         def check_recording(route):
                             self.assertTrue(route.request.headers["content-type"].startswith("audio/webm"))
@@ -317,10 +314,25 @@ class Demo(TestCase):
                             self.assertLess(len(clip), 16000)
                             route.fulfill(json={"text": "我的学习进度怎样"})
 
-                        cloud_voice.route("**/api/labs", voice_configuration)
+                        cloud_voice.route("**/api/labs", lambda route: pending_config.append(route))
                         cloud_voice.route("**/api/pet/voice", check_recording)
+                        cloud_voice.route("**/api/pet/speech", lambda route: route.fulfill(
+                            status=503, json={"error": "朗读测试服务暂不可用。"}))
                         with cloud_voice.expect_response("**/api/pet/sessions") as session:
                             cloud_voice.goto("http://127.0.0.1:8000", wait_until="domcontentloaded")
+                        cloud_voice.get_by_role("button", name="问助教", exact=True).click()
+                        cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
+                        cloud_prompt.fill("你好")
+                        cloud_prompt.press("Enter")
+                        expect(cloud_voice.locator("#pet-reply")).to_contain_text("你好呀")
+                        self.assertEqual(len(pending_config), 1)
+                        config = pending_config[0].fetch().json()
+                        config.update(voice=True, speech=True)
+                        with cloud_voice.expect_request("**/api/pet/speech") as early_reply:
+                            pending_config[0].fulfill(json=config)
+                        self.assertIn("你好呀", early_reply.value.post_data_json["text"])
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("朗读测试服务暂不可用")
+                        cloud_voice.get_by_label("自动朗读").uncheck()
                         expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()
                         cloud_voice.keyboard.press("Control+Alt+m")
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
@@ -330,7 +342,6 @@ class Demo(TestCase):
                         cloud_voice.wait_for_timeout(850)
                         with cloud_voice.expect_request("**/api/pet/voice"):
                             cloud_voice.keyboard.press("Control+Alt+m")
-                        cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
                         expect(cloud_prompt).to_have_value("我的学习进度怎样")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
                         cloud_prompt.press("Enter")
