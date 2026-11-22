@@ -175,12 +175,11 @@ td code { font: 18px var(--mono); }
 .pet-launch.dragging { cursor: grabbing; }
 .pet-launch:disabled { opacity: 1; }
 .pet-figure { display: block; width: 100%; height: 100%; pointer-events: none;
-  --cycle: 2.6s;
-  background: url("/pet/whale-stand.webp?v=2") center / contain no-repeat;
+  --cycle: 2.6s; position: relative; overflow: hidden;
   transform-origin: 50% 86%; filter: drop-shadow(0 3px 3px #23365b30); }
-.pet-launch[data-art] .pet-figure {
-  background: var(--frames) 0 0 / 800% 100% no-repeat;
-}
+.pet-stand { display: block; width: 100%; height: 100%; object-fit: contain; }
+.pet-strip { position: absolute; top: 0; left: 0; width: 800%; height: 100%; max-width: none; }
+.pet-launch[data-art] .pet-stand { visibility: hidden; }
 .pet-launch[data-facing="left"] .pet-figure { transform: scaleX(-1); }
 .pet-launch[data-pose="greet"] .pet-figure { --cycle: 1.4s; }
 .pet-launch[data-pose="walk"] .pet-figure { --cycle: .68s; }
@@ -195,9 +194,9 @@ td code { font: 18px var(--mono); }
 .pet-launch[data-pose="drag"] .pet-figure { --cycle: .8s; }
 @media (prefers-reduced-motion: no-preference) {
   .pet-launch[data-roaming="true"] { transition: left 1.85s ease-in-out, top 1.85s ease-in-out; }
-  .pet-launch[data-motion="true"][data-art] .pet-figure { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
-  .pet-launch[data-motion="true"][data-art="look"][data-gaze="pointer"] .pet-figure {
-    animation: none; background-position-x: var(--gaze-frame, 0%);
+  .pet-launch[data-motion="true"][data-art] .pet-strip { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
+  .pet-launch[data-motion="true"][data-art="look"][data-gaze="pointer"] .pet-strip {
+    animation: none; transform: translateX(var(--gaze-frame, 0%));
   }
   .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="stand"], [data-pose="listen"], [data-pose="focus"]) .pet-figure {
     animation: pet-breathe 2.8s ease-in-out infinite;
@@ -211,10 +210,10 @@ td code { font: 18px var(--mono); }
   .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="sit"], [data-pose="sleep"]) .pet-figure {
     scale: 1 .94; animation: pet-breathe 3.2s ease-in-out infinite;
   }
-  .pet-launch[data-motion="true"][data-pose="snack"] .pet-figure { animation-iteration-count: 1; animation-fill-mode: forwards; }
+  .pet-launch[data-motion="true"][data-pose="snack"] .pet-strip { animation-iteration-count: 1; animation-fill-mode: forwards; }
   .pet-launch[data-motion="true"]:hover .pet-figure { filter: drop-shadow(0 5px 8px #365ad267); }
 }
-@keyframes pet-frames { from { background-position-x: 0%; } to { background-position-x: 100%; } }
+@keyframes pet-frames { from { transform: translateX(0); } to { transform: translateX(-87.5%); } }
 @keyframes pet-hello { 20%, 70% { rotate: -7deg; translate: 0 -5px; } 45% { rotate: 5deg; } }
 @keyframes pet-step { 50% { translate: 0 -7px; rotate: 3deg; } }
 @keyframes pet-breathe { 50% { translate: 0 -2px; } }
@@ -350,7 +349,7 @@ td code { font: 18px var(--mono); }
 </dialog>
 <button id="pet-launch" class="pet-launch" type="button" aria-label="鲸鱼娘助教" aria-controls="pet-panel"
   aria-expanded="false" data-motion="true" data-pose="greet" title="鲸鱼娘助教 · 点击打开，可拖动" disabled>
-  <span class="pet-figure" aria-hidden="true"></span>
+  <span class="pet-figure" aria-hidden="true"><img class="pet-stand" src="/pet/whale-stand.webp" alt="" draggable="false"></span>
 </button>
 <p id="pet-bubble" class="pet-bubble" role="status">嗨，我是鲸鱼娘助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>

@@ -129,10 +129,9 @@ class Demo(TestCase):
                     pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
                     pet_reply = pet_panel.locator("#pet-reply")
                     portrait = pet.locator(".pet-figure")
-                    expect(portrait).to_have_css("background-image", re.compile("whale-stand.webp"))
-                    self.assertEqual(page.evaluate("""async () => {
-                      const image = new Image();
-                      image.src = '/pet/whale-stand.webp?v=2';
+                    poster = portrait.locator(".pet-stand")
+                    expect(poster).to_have_attribute("src", re.compile(r"^data:image/webp;base64,"))
+                    self.assertEqual(poster.evaluate("""async image => {
                       await image.decode();
                       return [image.naturalWidth, image.naturalHeight];
                     }"""), [336, 336])
@@ -241,7 +240,8 @@ class Demo(TestCase):
                         pending_script[0].continue_()
                         expect(mobile.get_by_role("button", name="问助教")).to_be_enabled()
                         mobile_pet = mobile.locator("#pet-launch")
-                        expect(mobile_pet.locator(".pet-figure")).to_have_css("background-image", re.compile("whale-stand.webp"))
+                        mobile_poster = mobile_pet.locator(".pet-stand")
+                        expect(mobile_poster).to_be_visible()
                         with mobile.expect_request("**/pet/whale-greet.webp"):
                             mobile.evaluate("window.showTraceTab()")
                         expect(mobile.locator("#pet-bubble")).to_have_attribute("data-kind", "welcome")
@@ -250,6 +250,8 @@ class Demo(TestCase):
                         self.assertTrue(pending_art)
                         pending_art[0].continue_()
                         expect(mobile_pet).to_have_attribute("data-art", "greet")
+                        self.assertEqual(mobile_pet.locator(".pet-strip").evaluate("(image) => image.naturalWidth"), 2048)
+                        expect(mobile_poster).to_be_hidden()
                         expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
                         expect(mobile.locator(".quote-line")).to_have_css("white-space", "nowrap")
@@ -257,8 +259,13 @@ class Demo(TestCase):
                             "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
                         mobile.mouse.move(20, 120)
                         home = mobile_pet.bounding_box()["x"]
-                        mobile.clock.run_for(5700)
+                        mobile.route("**/pet/whale-walk.webp", lambda route: route.fulfill(
+                            content_type="image/webp", body=b"invalid sprite"))
+                        with mobile.expect_response("**/pet/whale-walk.webp"):
+                            mobile.clock.run_for(5700)
                         expect(mobile_pet).to_have_attribute("data-roaming", "true")
+                        expect(mobile_poster).to_be_visible()
+                        expect(mobile_pet.locator(".pet-strip")).to_have_count(0)
                         self.assertLess(float(mobile_pet.evaluate("(el) => parseFloat(el.style.left)")), home - 40)
                         mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "look")
@@ -334,7 +341,7 @@ class Demo(TestCase):
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
                         expect(pet).to_have_attribute("data-pose", "focus")
-                        expect(portrait).to_have_css("animation-name", "pet-frames", timeout=10000)
+                        expect(portrait.locator(".pet-strip")).to_have_css("animation-name", "pet-frames", timeout=10000)
                         expect(pet_bubble).to_be_visible()
                         held[0].continue_()
                     page.unroute("**/api/runs")

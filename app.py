@@ -1,4 +1,5 @@
 """Local, on-demand TraceTutor demo server."""
+from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -24,6 +25,9 @@ import pet_speech
 
 DATABASE = Path(os.getenv("TRACETUTOR_DB", ".tracetutor/runs.sqlite3"))
 PAGE = Path(__file__).with_name("index.html")
+PET_POSTER = b"data:image/webp;base64," + b64encode(
+    PAGE.with_name("pet").joinpath("whale-stand.webp").read_bytes()
+)
 VOICE_CACHE = PAGE.parent / ".tracetutor/voice"
 if (VOICE_CACHE / "python").is_dir():
     sys.path.append(str(VOICE_CACHE / "python"))
@@ -161,7 +165,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlsplit(self.path)
         if url.path == "/":
-            return self.send_data(200, PAGE.read_bytes(), "text/html; charset=utf-8")
+            page = PAGE.read_bytes().replace(b'src="/pet/whale-stand.webp"', b'src="' + PET_POSTER + b'"', 1)
+            return self.send_data(200, page, "text/html; charset=utf-8")
         if url.path in PET_ASSETS:
             cache = "private, max-age=900" if url.path.endswith(".webp") else "no-store"
             return self.send_data(200, PAGE.with_name("pet").joinpath(Path(url.path).name).read_bytes(),

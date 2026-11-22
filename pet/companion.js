@@ -360,8 +360,9 @@ function makeCompanion(activeLab, openResult) {
   const motion = byId("pet-motion"), proactive = byId("pet-proactive");
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const greeting = bubble.textContent;
-  const readyArtwork = new Set(), artworkFailures = new Map();
-  let loadingArtwork;
+  const figure = avatar.querySelector(".pet-figure");
+  const readyArtwork = new Map(), artworkFailures = new Map();
+  let loadingArtwork, shownArtwork;
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
   let poseTimer, voicePose, greeted = false, pendingBubble, activityIndex = 0, hoverIndex = 0;
@@ -386,28 +387,45 @@ function makeCompanion(activeLab, openResult) {
 
   function showArtwork() {
     const pose = avatar.dataset.pose;
-    const path = "/pet/whale-" + pose + ".webp";
-    if (readyArtwork.has(pose)) {
-      avatar.style.setProperty("--frames", 'url("' + path + '")');
+    const prepared = readyArtwork.get(pose);
+    if (prepared) {
+      if (shownArtwork !== prepared) {
+        shownArtwork?.remove();
+        figure.append(prepared);
+        shownArtwork = prepared;
+      }
       avatar.dataset.art = pose;
       return;
     }
     delete avatar.dataset.art;
-    avatar.style.removeProperty("--frames");
+    shownArtwork?.remove();
+    shownArtwork = undefined;
     if (pose === "stand" || (voicePose && voicePose !== "talk") || loadingArtwork || avatar.hidden || document.hidden ||
         !motion.checked || reducedMotion.matches || (artworkFailures.get(pose) || 0) >= 2) return;
     const image = loadingArtwork = new Image();
+    image.className = "pet-strip";
+    image.alt = "";
+    image.draggable = false;
     image.fetchPriority = "low";
-    image.onload = () => {
-      readyArtwork.add(pose);
+    function failed() {
+      if (loadingArtwork !== image) return;
+      artworkFailures.set(pose, (artworkFailures.get(pose) || 0) + 1);
+      loadingArtwork = undefined;
+    }
+    image.onload = async () => {
+      try {
+        await image.decode();
+      } catch {
+        return failed();
+      }
+      if (loadingArtwork !== image) return;
+      if (!image.naturalHeight || image.naturalWidth !== 8 * image.naturalHeight) return failed();
+      readyArtwork.set(pose, image);
       loadingArtwork = undefined;
       showArtwork();
     };
-    image.onerror = () => {
-      artworkFailures.set(pose, (artworkFailures.get(pose) || 0) + 1);
-      loadingArtwork = undefined;
-    };
-    image.src = path;
+    image.onerror = failed;
+    image.src = "/pet/whale-" + pose + ".webp";
   }
 
   function updateAppearance() {
@@ -780,7 +798,7 @@ function makeCompanion(activeLab, openResult) {
     const ratio = (event.clientX - left) / width;
     const facing = avatar.dataset.facing === "left" ? 1 - ratio : ratio;
     const frame = facing < .37 ? 6 : facing > .63 ? 2 : 0;
-    avatar.style.setProperty("--gaze-frame", (frame / 7 * 100) + "%");
+    avatar.style.setProperty("--gaze-frame", (-frame * 12.5) + "%");
   }
 
   avatar.addEventListener("pointerenter", event => {
