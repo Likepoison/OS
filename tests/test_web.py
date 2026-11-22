@@ -287,8 +287,10 @@ class Demo(TestCase):
                             route.fulfill(json=config)
 
                         def check_recording(route):
-                            self.assertEqual(route.request.headers["content-type"], "audio/pcm")
-                            self.assertGreaterEqual(len(route.request.post_data_buffer), 8000)
+                            self.assertTrue(route.request.headers["content-type"].startswith("audio/webm"))
+                            clip = route.request.post_data_buffer
+                            self.assertTrue(clip.startswith(b"\x1a\x45\xdf\xa3"))
+                            self.assertLess(len(clip), 16000)
                             route.fulfill(json={"text": "我的学习进度怎样"})
 
                         cloud_voice.route("**/api/labs", voice_configuration)
@@ -299,7 +301,7 @@ class Demo(TestCase):
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
                         expect(stop).to_be_visible()
                         expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
-                        # The fake microphone still captures real-time PCM through the browser.
+                        # The fake microphone supplies real-time audio to MediaRecorder.
                         cloud_voice.wait_for_timeout(850)
                         with cloud_voice.expect_request("**/api/pet/voice"):
                             stop.click()
@@ -309,7 +311,7 @@ class Demo(TestCase):
                         cloud_prompt.press("Enter")
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
                         invalid = cloud_voice.request.post("http://127.0.0.1:8000/api/pet/voice",
-                                                           data=b"\0" * 384001, headers={"Content-Type": "audio/pcm"})
+                                                           data=b"\0" * 131073, headers={"Content-Type": "audio/webm"})
                         self.assertEqual(invalid.status, 413)
                     finally:
                         cloud_voice.close()

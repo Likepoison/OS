@@ -42,56 +42,14 @@ const callClues = {
 const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
 const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本轮小结/;
 
-function registerVoiceCapture() {
-  class VoiceCapture extends AudioWorkletProcessor {
-    constructor() {
-      super();
-      this.samples = new Int16Array(sampleRate * 12);
-      this.offset = 0;
-      this.finished = false;
-      this.port.onmessage = () => this.finish();
-    }
-
-    finish() {
-      if (this.finished) return;
-      this.finished = true;
-      const audio = this.samples.slice(0, this.offset).buffer;
-      this.port.postMessage(audio, [audio]);
-    }
-
-    process(inputs) {
-      if (this.finished) return false;
-      const channel = inputs[0][0];
-      if (!channel) return true;
-      for (let i = 0; i < channel.length && this.offset < this.samples.length; i++) {
-        const sample = Math.max(-1, Math.min(1, channel[i]));
-        this.samples[this.offset++] = sample * (sample < 0 ? 32768 : 32767);
-      }
-      if (this.offset === this.samples.length) this.finish();
-      return !this.finished;
-    }
-  }
-
-  registerProcessor("trace-voice-capture", VoiceCapture);
-}
-
-async function loadVoiceCapture(context) {
-  const module = "(" + registerVoiceCapture.toString() + ")();";
-  const url = URL.createObjectURL(new Blob([module], {type: "text/javascript"}));
-  try {
-    await context.audioWorklet.addModule(url);
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 function setupPetVoice(input, message, resize, setVoicePose) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const Audio = window.AudioContext || window.webkitAudioContext;
-  const canRecord = Boolean(window.isSecureContext && Audio && window.AudioWorkletNode &&
-    navigator.mediaDevices?.getUserMedia);
+  const Recorder = window.MediaRecorder;
+  const format = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
+    .find(type => Recorder?.isTypeSupported(type));
+  const canRecord = Boolean(window.isSecureContext && format && navigator.mediaDevices?.getUserMedia);
   let listener, timeout, recording, playback, useServer = false;
   function note(text = "") {
     status.hidden = !text;
@@ -185,8 +143,8 @@ function setupPetVoice(input, message, resize, setVoicePose) {
   }
 
   function releaseAudio(session) {
+    if (session.recorder && session.recorder.state !== "inactive") session.recorder.stop();
     session.stream?.getTracks().forEach(track => track.stop());
-    if (session.context.state !== "closed") session.context.close().catch(() => {});
   }
 
   function closeRecording() {
@@ -210,14 +168,14 @@ function setupPetVoice(input, message, resize, setVoicePose) {
       closeRecording();
       note("录音没有返回，请再试一次。");
     }, 2500);
-    session.node.port.postMessage("finish");
+    if (session.recorder.state !== "inactive") session.recorder.stop();
   }
 
   async function transcribe(session, audio) {
     if (recording !== session) return;
     clearTimeout(session.timer);
     releaseAudio(session);
-    if (!(audio instanceof ArrayBuffer) || audio.byteLength < 8000) {
+    if (audio.size < 100) {
       closeRecording();
       note("这段录音太短。请说完后再点结束。");
       return;
@@ -228,7 +186,7 @@ function setupPetVoice(input, message, resize, setVoicePose) {
     session.timer = setTimeout(() => session.request.abort(), 35000);
     try {
       const result = await api("/api/pet/voice", {method: "POST", signal: session.request.signal,
-        headers: {"Content-Type": "audio/pcm"}, body: audio});
+        headers: {"Content-Type": audio.type}, body: audio});
       if (recording !== session) return;
       closeRecording();
       showTranscript(result.text);
@@ -240,38 +198,33 @@ function setupPetVoice(input, message, resize, setVoicePose) {
   }
 
   async function startServerRecording() {
-    let session;
+    const session = recording = {request: new AbortController(), phase: "permission"};
     try {
-      const context = new Audio({sampleRate: 16000});
-      session = recording = {context, request: new AbortController(), phase: "permission", timer: null};
-      if (context.sampleRate !== 16000) throw new Error("Unsupported audio sample rate");
       micState("取消录音", "listen");
       note("正在打开麦克风。若浏览器询问权限，请选择允许。");
-      const streamReady = navigator.mediaDevices.getUserMedia({audio: {
+      session.stream = await navigator.mediaDevices.getUserMedia({audio: {
         channelCount: 1, echoCancellation: true, noiseSuppression: true
-      }}).then(stream => {
-        session.stream = stream;
-        if (recording !== session) releaseAudio(session);
+      }});
+      if (recording !== session) return releaseAudio(session);
+      const recorder = session.recorder = new Recorder(session.stream, {
+        mimeType: format, audioBitsPerSecond: 24000
       });
-      await Promise.all([streamReady, context.resume(), loadVoiceCapture(context)]);
-      if (recording !== session) return;
-      const node = new AudioWorkletNode(context, "trace-voice-capture", {numberOfOutputs: 0});
-      node.port.onmessage = event => transcribe(session, event.data);
-      node.onprocessorerror = () => {
+      const fragments = [];
+      recorder.ondataavailable = event => { if (event.data.size) fragments.push(event.data); };
+      recorder.onstop = () => transcribe(session, new Blob(fragments, {type: recorder.mimeType}));
+      recorder.onerror = () => {
         if (recording === session) {
           closeRecording();
           note("录音中断，请重新点击语音输入。");
         }
       };
-      session.node = node;
-      session.source = context.createMediaStreamSource(session.stream);
-      session.source.connect(node);
+      recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
       note("正在听。说完点「结束并转写」，单次最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
-      if (session && recording !== session) return;
+      if (recording !== session) return;
       closeRecording();
       const failure = {
         NotAllowedError: "麦克风权限未开启。请在地址栏允许麦克风后重试。",

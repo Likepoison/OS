@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import subprocess
 import sys
 from threading import BoundedSemaphore, Thread
 from urllib.parse import parse_qs, urlsplit
@@ -43,6 +44,7 @@ PET_ROUTE = re.compile(r"/api/pet/sessions/([a-f0-9]{32})(?:/(close|touch))?")
 VOICE_PATH = Path(os.getenv("TRACETUTOR_VOICE_MODEL", VOICE_CACHE / "vosk-model-small-cn-0.22"))
 AUDIO_RATE = 16000
 AUDIO_LIMIT = 12 * AUDIO_RATE * 2
+RECORDING_FORMATS = {"audio/webm": "matroska", "audio/ogg": "ogg", "audio/mp4": "mov"}
 VOICE_SLOT = BoundedSemaphore(1)
 SPEECH_SLOT = BoundedSemaphore(1)
 voice_model = None
@@ -50,7 +52,20 @@ logging.basicConfig(level=logging.INFO)
 
 
 def voice_available():
-    return (VOICE_PATH / "am/final.mdl").is_file() and find_spec("vosk") is not None
+    return ((VOICE_PATH / "am/final.mdl").is_file() and find_spec("vosk") is not None
+            and find_spec("imageio_ffmpeg") is not None)
+
+
+def decode_recording(content_type, recording):
+    from imageio_ffmpeg import get_ffmpeg_exe
+
+    result = subprocess.run(
+        [get_ffmpeg_exe(), "-nostdin", "-hide_banner", "-loglevel", "error",
+         "-protocol_whitelist", "pipe", "-f", RECORDING_FORMATS[content_type], "-i", "pipe:0",
+         "-vn", "-ac", "1", "-ar", str(AUDIO_RATE), "-t", "12", "-f", "s16le", "pipe:1"],
+        input=recording, capture_output=True, check=True, timeout=8,
+    )
+    return result.stdout
 
 
 def transcribe_voice(audio):
@@ -134,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), display-capture=()")
         self.send_header("Content-Security-Policy",
-                         "default-src 'none'; script-src 'self' 'unsafe-inline' blob:; style-src 'unsafe-inline'; "
+                         "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; "
                          "connect-src 'self'; img-src 'self' data:; media-src blob:; frame-ancestors 'none'; base-uri 'none'")
         self.end_headers()
         if self.command != "HEAD":
@@ -231,15 +246,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_data(429, {"error": "本轮桌宠记忆已满。请先回顾已记录内容。"})
 
     def pet_voice_request(self):
-        if self.headers.get_content_type() != "audio/pcm":
+        content_type = self.headers.get_content_type()
+        raw = content_type == "audio/pcm"
+        if not raw and content_type not in RECORDING_FORMATS:
             return self.send_data(415, {"error": "录音格式无效。"})
         try:
             size = int(self.headers.get("Content-Length", 0))
         except ValueError:
             return self.send_data(400, {"error": "录音长度无效。"})
-        if size > AUDIO_LIMIT:
+        if size > (AUDIO_LIMIT if raw else 128 * 1024):
             return self.send_data(413, {"error": "一次最多录制 12 秒。"})
-        if size < AUDIO_RATE // 2 or size % 2:
+        if size < (AUDIO_RATE // 2 if raw else 100) or (raw and size % 2):
             return self.send_data(400, {"error": "录音太短，请说完后再结束。"})
         if not voice_available():
             return self.send_data(503, {"error": "演示环境的普通话识别暂不可用。"})
@@ -252,6 +269,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_data(408, {"error": "录音上传超时，请重试。"})
             if len(audio) != size:
                 return self.send_data(400, {"error": "录音未传完，请重试。"})
+            if not raw:
+                try:
+                    audio = decode_recording(content_type, audio)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    return self.send_data(400, {"error": "录音无法解码，请再试一次。"})
+                except (OSError, RuntimeError):
+                    logging.exception("Voice decoder unavailable")
+                    return self.send_data(503, {"error": "录音解码服务暂不可用。"})
+                if len(audio) < AUDIO_RATE // 2:
+                    return self.send_data(400, {"error": "录音太短，请说完后再结束。"})
             try:
                 transcript = transcribe_voice(audio)
             except Exception:
