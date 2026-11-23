@@ -241,6 +241,11 @@ td code { font: 18px var(--mono); }
 .pet-head h2 { margin: 0; }
 .pet-reply { background: var(--soft); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
 .pet-panel .tool-row { margin-bottom: 10px; }
+#pet-actions { --action-gap: 7px; gap: var(--action-gap); }
+#pet-actions > .button:nth-child(-n+3) {
+  flex: 0 0 calc((100% - 2 * var(--action-gap)) / 3); min-width: 0;
+  justify-content: center; padding-inline: 4px; text-align: center;
+}
 .pet-form input { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 7px; padding: 7px; }
 .pet-form button { flex: none; }
 #pet-heard { margin-top: 6px; overflow-wrap: anywhere; }
