@@ -75,9 +75,10 @@ class Demo(TestCase):
                         route.fulfill(json=config)
 
                     later_speech = []
+                    defer_replay = False
 
                     def synthesize(route):
-                        if route.request.post_data_json["voice"] == "xiaoyi":
+                        if not defer_replay and route.request.post_data_json["voice"] == "xiaoyi":
                             route.fulfill(content_type="audio/mpeg", body=b"\xff\xfb",
                                           headers={"X-TraceTutor-Voice": "xiaoya"})
                         else:
@@ -185,6 +186,9 @@ class Demo(TestCase):
                     expect(pet_reply).to_contain_text("答对啦")
                     voice = pet_panel.get_by_role("button", name="语音输入")
                     prompt = pet_panel.get_by_role("textbox", name="问鲸鱼娘")
+                    auto_read = pet_panel.get_by_label("自动朗读")
+                    expect(auto_read).to_be_checked()
+                    auto_read.uncheck()
                     pet_panel.locator("#pet-title").focus()
                     page.keyboard.down("t")
                     expect(pet_panel.get_by_role("button", name="停止聆听")).to_be_visible()
@@ -192,31 +196,30 @@ class Demo(TestCase):
                       window.currentDictation.onresult({resultIndex: 0, results: [[{transcript: "你好"}]]});
                       window.currentDictation.onend();
                     }""")
-                    expect(prompt).to_have_value("")
+                    expect(pet_panel.locator("#pet-heard")).to_be_hidden()
                     page.keyboard.up("t")
-                    expect(prompt).to_have_value("你好")
-                    prompt.clear()
+                    expect(pet_panel.locator("#pet-heard")).to_have_text("听到「你好」，已发送。")
+                    expect(pet_reply).to_contain_text("你好呀")
+                    auto_read.check()
+                    prompt.fill("尚未发送的草稿")
+                    prompt.dispatch_event("keydown", {"key": "Enter", "code": "Enter", "isComposing": True})
+                    expect(prompt).to_have_value("尚未发送的草稿")
                     voice.click()
                     expect(pet_panel.get_by_role("button", name="停止聆听")).to_be_visible()
-                    page.evaluate("""window.currentDictation.onresult({
-                        resultIndex: 0, results: [[{transcript: "我的学习进度怎样"}]]
-                    })""")
-                    expect(prompt).to_have_value("我的学习进度怎样")
-                    expect(pet_reply).to_contain_text("答对啦")
-                    expect(pet_panel.get_by_label("自动朗读")).to_be_checked()
-                    expect(pet_panel.get_by_label("朗读音色")).to_have_value("xiaoyi")
-                    prompt.dispatch_event("keydown", {"key": "Enter", "code": "Enter", "isComposing": True})
-                    expect(prompt).to_have_value("我的学习进度怎样")
+                    expect(pet_panel.get_by_label("朗读音色")).to_have_count(0)
                     with page.expect_request("**/api/pet/speech") as spoken, page.expect_request(
                             lambda request: request.url.endswith("/api/pet/speech")
                             and request.post_data_json["voice"] == "xiaoya") as prefetched:
-                        prompt.press("Enter")
+                        page.evaluate("""window.currentDictation.onresult({
+                            resultIndex: 0, results: [[{transcript: "我的学习进度怎样"}]]
+                        })""")
+                    expect(prompt).to_have_value("尚未发送的草稿")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
                     self.assertEqual(spoken.value.post_data_json["voice"], "xiaoyi")
                     self.assertTrue(spoken.value.post_data_json["text"].startswith("当前实验评测"))
                     self.assertIn("概念题答对 1/2 次", prefetched.value.post_data_json["text"])
                     expect(pet).to_have_attribute("data-pose", "talk")
-                    expect(pet_panel.locator("#pet-voice-status")).to_contain_text("正用小雅")
+                    expect(pet_panel.locator("#pet-voice-status")).to_be_hidden()
                     text = spoken.value.post_data_json["text"]
                     expect(pet_bubble).to_have_attribute("data-kind", "spoken")
                     expect(pet_bubble).to_have_text(text[:1])
@@ -235,15 +238,21 @@ class Demo(TestCase):
                         text += sentence
                         expect(pet_bubble).to_have_text(text)
                     expect(pet_panel.get_by_role("button", name="朗读回复")).to_be_enabled()
-                    pet_panel.get_by_label("朗读音色").select_option("xiaoya")
-                    with page.expect_request("**/api/pet/speech"):
+                    defer_replay = True
+                    with page.expect_request("**/api/pet/speech") as replay:
                         pet_panel.get_by_role("button", name="朗读回复").click()
+                    self.assertEqual(replay.value.post_data_json["voice"], "xiaoyi")
                     expect(pet_bubble).to_be_hidden()
                     pet_panel.get_by_role("button", name="停止朗读").click()
                     pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
                     expect(pet_panel.locator("#pet-voice-status")).to_contain_text("可以继续打字")
+                    voice.click()
+                    page.evaluate("""window.currentDictation.onresult({
+                        resultIndex: 0, results: [[{transcript: "啊那个"}]]
+                    })""")
+                    expect(pet_reply).to_contain_text("还没对上当前实验")
                     user_text = "<b>无关内容</b>"
                     requests = []
                     def collect(request):
@@ -346,7 +355,7 @@ class Demo(TestCase):
                     try:
                         pending_config = []
                         session_requests = []
-                        voice_responses = iter([{"text": "我的学习进度怎样"}, {"text": "", "reason": "no_signal"}])
+                        voice_responses = iter([{"text": "我的学习进驻怎样"}, {"text": "", "reason": "no_signal"}])
                         cloud_voice.add_init_script("""(() => {
                           const media = navigator.mediaDevices;
                           const capture = media.getUserMedia.bind(media);
@@ -394,7 +403,7 @@ class Demo(TestCase):
                         with cloud_voice.expect_request("**/api/pet/speech") as early_reply:
                             pending_config[0].fulfill(json=config)
                         self.assertIn("你好呀", early_reply.value.post_data_json["text"])
-                        expect(cloud_voice.get_by_label("朗读音色")).to_have_value("xiaoya")
+                        self.assertEqual(early_reply.value.post_data_json["voice"], "xiaoya")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("朗读测试服务暂不可用")
                         cloud_voice.get_by_label("自动朗读").uncheck()
                         expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()
@@ -415,7 +424,7 @@ class Demo(TestCase):
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
                         expect(stop).to_be_visible()
                         expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
-                        expect(cloud_voice.locator("#pet-mic-level")).to_be_visible()
+                        expect(cloud_voice.locator("#pet-panel meter")).to_have_count(0)
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("录音")
                         # The fake microphone supplies real-time audio to MediaRecorder.
                         cloud_voice.wait_for_timeout(850)
@@ -423,10 +432,9 @@ class Demo(TestCase):
                         expect(stop).to_be_visible()
                         with cloud_voice.expect_request("**/api/pet/voice"):
                             cloud_voice.keyboard.up("t")
-                        expect(cloud_prompt).to_have_value("我的学习进度怎样")
-                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("确认文字后发送")
-                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
-                        cloud_prompt.press("Enter")
+                        expect(cloud_prompt).to_have_value("")
+                        expect(cloud_voice.locator("#pet-heard")).to_have_text(
+                            "听到「我的学习进驻怎样」，按「我的学习进度怎样」理解。")
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("概念题答对 0/0 次")
                         stale = session.value.url + "/" + session.value.json()["id"]
                         self.assertEqual(cloud_voice.request.post(stale + "/close").status, 200)
@@ -455,11 +463,9 @@ class Demo(TestCase):
                         expect(stop).to_be_visible()
                         cloud_voice.evaluate("() => window.lastInputTrack.dispatchEvent(new Event('ended'))")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("录音设备已断开")
-                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
                         cloud_voice.evaluate("() => { window.denyMicrophone = true; }")
                         cloud_voice.get_by_role("button", name="语音输入", exact=True).click()
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("本站权限")
-                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
                         invalid = cloud_voice.request.post("http://127.0.0.1:8000/api/pet/voice",
                                                            data=b"\0" * 131073, headers={"Content-Type": "audio/webm"})
                         self.assertEqual(invalid.status, 413)

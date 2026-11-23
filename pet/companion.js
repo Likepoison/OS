@@ -42,18 +42,28 @@ const callClues = {
 const callAliases = {pipe2:"pipe", clone3:"clone", open:"openat", openat2:"openat", readv:"read", writev:"write", waitid:"wait4"};
 const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本轮小结/;
 
-function setupPetVoice(input, message, resize, setVoicePose, caption) {
+function interpretSpeech(text, lab) {
+  let question = text.replace(/学习进[驻渡都]/g, "学习进度")
+    .replace(/文件描述(?:服务|福|幅)/g, "文件描述符")
+    .replace(/系统调用(?:鬼其|轨记|跪迹)/g, "系统调用轨迹");
+  if (lab === "pipe" || /管道|写端/.test(question)) question = question.replace(/(?:独端|读段)/g, "读端");
+  if (lab === "mutex" || lab === "deadlock" || /线程|互斥/.test(question)) {
+    question = question.replace(/(?:线成|县城)(?=发生|同步|等待)/g, "线程")
+      .replace(/(?:发生|检测|判断)(?:了)?(?:死索|思索)/g, match => match.slice(0, -2) + "死锁");
+  }
+  return question;
+}
+
+function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, canAsk) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
-  const voiceStyle = byId("pet-voice-style"), voiceChoice = byId("pet-voice-choice");
   const devices = byId("pet-mic-devices"), device = byId("pet-mic-device");
-  const level = byId("pet-mic-level"), meter = byId("pet-mic-meter");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const Recorder = window.MediaRecorder;
   const format = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4"]
     .find(type => Recorder?.isTypeSupported(type));
   const canRecord = Boolean(window.isSecureContext && format && navigator.mediaDevices?.getUserMedia);
-  let listener, timeout, recording, playback, pendingReply, speechReady = false, useServer = false;
+  let listener, timeout, recording, playback, pendingReply, preferredVoice, speechReady = false, useServer = false;
   let inputUpdate = 0;
   function note(text = "") {
     status.hidden = !text;
@@ -81,11 +91,8 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   }
   function enableServer(configuration) {
     speechReady = configuration !== undefined;
-    const voices = configuration?.voices ?? [];
-    for (const option of voiceStyle.options) option.disabled = !voices.includes(option.value);
-    if (!voices.includes(voiceStyle.value)) voiceStyle.value = voices[0] ?? "xiaoyi";
-    voiceChoice.hidden = voices.length === 0;
-    read.disabled = autoRead.disabled = voices.length === 0;
+    preferredVoice = configuration?.voices?.[0];
+    read.disabled = autoRead.disabled = !preferredVoice;
     read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
     if (configuration === undefined) {
       mic.disabled = true;
@@ -108,9 +115,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
 
   function showTranscript(text) {
     if (!text) return note("没有识别到话语。请检查浏览器选用的麦克风，靠近后说完整一句再结束。");
-    input.value = text.slice(0, input.maxLength);
-    note("已转写。确认文字后发送。");
-    input.focus();
+    sendTranscript(text);
   }
 
   function finishNative() {
@@ -164,7 +169,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     try {
       active.start();
       micState("停止聆听", "listen");
-      note(held ? "正在听。说完松开 T，最多 12 秒。" : "浏览器正在识别普通话。转写后请确认发送。");
+      note(held ? "正在听。说完松开 T，最多 12 秒。" : "浏览器正在识别普通话，转写后会自动发送。");
       timeout = setTimeout(() => {
         if (held && !released) release();
         else if (stopListening()) note("本轮语音输入已结束，可以重试或打字。");
@@ -197,39 +202,9 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
   }
 
-  function monitorInput(session) {
-    const Audio = window.AudioContext || window.webkitAudioContext;
-    if (!Audio) return;
-    try {
-      const context = session.monitor = new Audio();
-      const analyser = context.createAnalyser();
-      context.createMediaStreamSource(session.stream).connect(analyser);
-      const samples = new Float32Array(analyser.fftSize);
-      level.hidden = false;
-      meter.value = 0;
-      session.meterTimer = setInterval(() => {
-        analyser.getFloatTimeDomainData(samples);
-        const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
-        meter.value = Math.min(1, rms * 8);
-      }, 100);
-      context.resume().catch(error => console.debug("Microphone level unavailable", error));
-    } catch (error) {
-      console.debug("Microphone level unavailable", error);
-    }
-  }
-
   function releaseAudio(session) {
-    clearInterval(session.meterTimer);
-    if (session.monitor && session.monitor.state !== "closed") {
-      session.monitor.close().catch(error => console.debug("Microphone monitor cleanup", error));
-      session.monitor = undefined;
-    }
     if (session.recorder && session.recorder.state !== "inactive") session.recorder.stop();
     session.stream?.getTracks().forEach(track => track.stop());
-    if (!recording || recording === session) {
-      level.hidden = true;
-      meter.value = 0;
-    }
   }
 
   function closeRecording() {
@@ -321,9 +296,8 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
       recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
-      monitorInput(session);
       const instruction = held ? "说完松开 T" : "说完点「结束并转写」";
-      note("正在用「" + session.deviceName + "」录音。" + instruction + "，最多 12 秒。");
+      note("正在用「" + session.deviceName + "」录音。" + instruction + "后自动发送，最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
       if (recording !== session) return;
@@ -352,6 +326,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
 
   function startInput(held) {
     if (mic.disabled || recording || listener) return;
+    if (!canAsk()) return note("上一条问题还在处理，请稍等。");
     stopPlayback();
     if (!useServer) return startNative(held);
     startServerRecording(held);
@@ -416,7 +391,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
     audio.onplaying = () => {
       if (playback !== narration || narration.audio !== audio) return;
-      note(narration.fallback ? "Xiaoyi 暂不可用，正用小雅继续朗读。" : "");
+      note();
       setVoicePose("talk");
       cancelAnimationFrame(narration.captionFrame);
       reveal();
@@ -452,7 +427,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     read.textContent = "停止朗读";
     note("鲸鱼娘正在准备语音。");
     setVoicePose("focus");
-    let voice = voiceStyle.value, completed = "";
+    let voice = preferredVoice, completed = "";
     const prepare = part => fetchClip(part, voice, request).catch(error => ({error}));
     try {
       let pending = prepare(sentences[0]);
@@ -460,7 +435,6 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
         const result = await pending;
         if (playback !== narration) return;
         if (result.error) throw result.error;
-        narration.fallback ||= voice === "xiaoyi" && result.voice === "xiaoya";
         voice = result.voice;
         if (i + 1 < sentences.length) pending = prepare(sentences[i + 1]);
         await playClip(narration, result.clip, completed, sentences[i]);
@@ -482,9 +456,6 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   read.addEventListener("click", () => readReply());
   navigator.mediaDevices?.addEventListener("devicechange", () => {
     if (useServer) refreshInputs(true);
-  });
-  voiceStyle.addEventListener("change", () => {
-    if (stopPlayback()) note();
   });
   function stop() {
     pendingReply = undefined;
@@ -559,6 +530,7 @@ function makeCompanion(activeLab, openResult) {
   const actions = byId("pet-actions"), quiz = byId("pet-quiz"), choices = byId("pet-choices");
   const form = byId("pet-form"), input = byId("pet-input");
   const send = form.querySelector('button[type="submit"]');
+  const heard = byId("pet-heard");
   let holdTimer, releaseVoice;
   const quickStudy = byId("quick-study"), restore = byId("pet-restore");
   const quickVoice = quickStudy.querySelector('[data-study="voice"]');
@@ -577,11 +549,11 @@ function makeCompanion(activeLab, openResult) {
   const memory = makeStudyMemory(), memoryStatus = byId("pet-memory-status");
   let lastVisit;
   let bubbleTimer;
-  const voice = setupPetVoice(input, message, () => place(panel), pose => {
+  const voice = setupPetVoice(message, () => place(panel), pose => {
     voicePose = pose;
     if (voicePose && voicePose !== "talk") cancelArtwork();
     updateAppearance();
-  }, showSpokenCaption);
+  }, showSpokenCaption, text => submitQuestion(text, true), () => !send.disabled);
 
   function cancelArtwork() {
     if (!loadingArtwork) return;
@@ -965,7 +937,7 @@ function makeCompanion(activeLab, openResult) {
     speak("当前是测试判定。先对照用例输入和输出，再看与失败相关的调用。");
   }
 
-  async function respond(text) {
+  async function respond(text, spoken = false) {
     if (recallQuestion.test(text)) return recap();
     if (/进度|学得|学到哪|答了几|小结|掌握/.test(text)) return reportProgress();
     if (/刚才.*(那条|事件|调用)|之前.*(那条|事件|调用)/.test(text)) {
@@ -974,6 +946,9 @@ function makeCompanion(activeLab, openResult) {
     }
     if (/正在看|在看什么|当前页面|这页|这条|这个调用|刚才那条/.test(text)) return explainView();
     if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
+    if (spoken && /文件描述符/.test(text)) {
+      return speak("文件描述符是进程引用已打开文件或管道端的编号。可以用它把轨迹里的读、写和关闭操作串起来。");
+    }
     if (/deepseek|\bai\b|提示|线索/i.test(text)) {
       if (activeRun?.ai) return speak("这次有 DeepSeek 的分层提问。可以打开提示，沿着引用回看系统调用。");
       return speak("先试试分层提示。勾选「请求 AI 提示」运行后，有可用证据时会尝试请 DeepSeek 帮你提问。");
@@ -990,6 +965,7 @@ function makeCompanion(activeLab, openResult) {
       return speak("我们可以从当前实验的一道概念题开始。也可打开轨迹，点一条调用的「问助教」。");
     }
     if (/你好|谢谢|嗨|hello|hi\b/i.test(text)) return speak("你好呀！我在这儿。你可以问我怎么看线索，或者做一道小测。");
+    if (spoken) return speak("这句话我还没对上当前实验。你想问系统调用、排查错误，还是查看学习进度？");
     speak("我可以陪你看本次结果、找轨迹、读提示，或者做一道操作系统小测。想先试哪个？");
   }
 
@@ -1204,25 +1180,33 @@ function makeCompanion(activeLab, openResult) {
     event.preventDefault();
     if (!event.repeat && !send.disabled) form.requestSubmit(send);
   });
-  form.addEventListener("submit", async event => {
-    event.preventDefault();
-    const text = input.value.trim();
+  async function submitQuestion(raw, spoken = false) {
+    const text = Array.from(raw.trim()).slice(0, input.maxLength).join("");
     if (!text || send.disabled) return;
+    const question = spoken ? interpretSpeech(text, activeLab()) : text;
     voice.stop();
     send.disabled = true;
-    input.value = "";
+    if (!spoken) input.value = "";
+    heard.hidden = !spoken;
+    heard.textContent = spoken ? "听到「" + text + "」" +
+      (question === text ? "，已发送。" : "，按「" + question + "」理解。") : "";
+    place(panel);
     message.textContent = "正在回复…";
     try {
-      const reply = await respond(text);
+      const reply = await respond(question, spoken);
       if (!panel.hidden) voice.readReply(true);
-      remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(text)});
+      remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(question)});
     } catch (error) {
-      if (!input.value) input.value = text;
+      if (!spoken && !input.value) input.value = text;
       speak("这次没能回复，请再试一次。");
       showMemoryStatus(error.message);
     } finally {
       send.disabled = false;
     }
+  }
+  form.addEventListener("submit", event => {
+    event.preventDefault();
+    submitQuestion(input.value);
   });
   select.addEventListener("change", () => { quiz.hidden = true; place(panel); });
   window.addEventListener("pagehide", () => {
@@ -1238,6 +1222,8 @@ function makeCompanion(activeLab, openResult) {
     greeted = false;
     pendingBubble = undefined;
     input.value = "";
+    heard.textContent = "";
+    heard.hidden = true;
     selectedEvent = undefined;
     visibleEvents = undefined;
     message.textContent = "";
