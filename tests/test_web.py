@@ -71,12 +71,20 @@ class Demo(TestCase):
 
                     def spoken_configuration(route):
                         config = route.fetch().json()
-                        config.update(voice=False, speech=True)
+                        config.update(voice=False, speech=True, speech_voices=["xiaoya", "xiaoyi"])
                         route.fulfill(json=config)
 
+                    later_speech = []
+
+                    def synthesize(route):
+                        if route.request.post_data_json["voice"] == "xiaoyi":
+                            route.fulfill(content_type="audio/mpeg", body=b"\xff\xfb",
+                                          headers={"X-TraceTutor-Voice": "xiaoya"})
+                        else:
+                            later_speech.append(route)
+
                     page.route("**/api/labs", spoken_configuration)
-                    page.route("**/api/pet/speech", lambda route: route.fulfill(
-                        content_type="audio/mpeg", body=b"\xff\xfb"))
+                    page.route("**/api/pet/speech", synthesize)
                     page.reload()
                     expect(page).to_have_title("TraceTutor——操作系统实验评测与智能诊断平台")
                     expect(page.locator(".brand")).to_contain_text("TraceTutor")
@@ -196,13 +204,19 @@ class Demo(TestCase):
                     expect(prompt).to_have_value("我的学习进度怎样")
                     expect(pet_reply).to_contain_text("答对啦")
                     expect(pet_panel.get_by_label("自动朗读")).to_be_checked()
+                    pet_panel.get_by_label("朗读音色").select_option("xiaoyi")
                     prompt.dispatch_event("keydown", {"key": "Enter", "code": "Enter", "isComposing": True})
                     expect(prompt).to_have_value("我的学习进度怎样")
-                    with page.expect_request("**/api/pet/speech") as spoken:
+                    with page.expect_request("**/api/pet/speech") as spoken, page.expect_request(
+                            lambda request: request.url.endswith("/api/pet/speech")
+                            and request.post_data_json["voice"] == "xiaoya") as prefetched:
                         prompt.press("Enter")
                     expect(pet_reply).to_contain_text("概念题答对 1/2 次")
-                    self.assertIn("概念题答对 1/2 次", spoken.value.post_data_json["text"])
+                    self.assertEqual(spoken.value.post_data_json["voice"], "xiaoyi")
+                    self.assertTrue(spoken.value.post_data_json["text"].startswith("当前实验评测"))
+                    self.assertIn("概念题答对 1/2 次", prefetched.value.post_data_json["text"])
                     expect(pet).to_have_attribute("data-pose", "talk")
+                    expect(pet_panel.locator("#pet-voice-status")).to_contain_text("正用小雅")
                     text = spoken.value.post_data_json["text"]
                     expect(pet_bubble).to_have_attribute("data-kind", "spoken")
                     expect(pet_bubble).to_have_text(text[:1])
@@ -212,6 +226,15 @@ class Demo(TestCase):
                     expect(pet_bubble).to_have_text(text[:1 + len(text) // 2])
                     page.evaluate("() => window.currentNarration.onended()")
                     expect(pet_bubble).to_have_text(text)
+                    expect(pet).to_have_attribute("data-pose", "focus")
+                    remaining = re.findall(r"[^。！？!?]+[。！？!?]*|[。！？!?]+", pet_reply.inner_text())[1:]
+                    for index, sentence in enumerate(remaining):
+                        later_speech[index].fulfill(content_type="audio/mpeg", body=b"\xff\xfb")
+                        expect(pet_bubble).to_have_text(text + sentence[:1])
+                        page.evaluate("() => window.currentNarration.onended()")
+                        text += sentence
+                        expect(pet_bubble).to_have_text(text)
+                    expect(pet_panel.get_by_role("button", name="朗读回复")).to_be_enabled()
                     pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
@@ -357,7 +380,7 @@ class Demo(TestCase):
                         expect(cloud_voice.locator("#pet-reply")).to_contain_text("你好呀")
                         self.assertEqual(len(pending_config), 1)
                         config = pending_config[0].fetch().json()
-                        config.update(voice=True, speech=True)
+                        config.update(voice=True, speech=True, speech_voices=["xiaoya"])
                         with cloud_voice.expect_request("**/api/pet/speech") as early_reply:
                             pending_config[0].fulfill(json=config)
                         self.assertIn("你好呀", early_reply.value.post_data_json["text"])

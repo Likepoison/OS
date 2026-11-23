@@ -45,6 +45,7 @@ const recallQuestion = /回顾|上次问|刚才问|上一问|记得.*问题|本�
 function setupPetVoice(input, message, resize, setVoicePose, caption) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
+  const voiceStyle = byId("pet-voice-style"), voiceChoice = byId("pet-voice-choice");
   const devices = byId("pet-mic-devices"), device = byId("pet-mic-device");
   const level = byId("pet-mic-level"), meter = byId("pet-mic-meter");
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -79,7 +80,11 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
   }
   function enableServer(configuration) {
     speechReady = configuration !== undefined;
-    read.disabled = autoRead.disabled = !configuration?.speak;
+    const voices = configuration?.voices ?? [];
+    for (const option of voiceStyle.options) option.disabled = !voices.includes(option.value);
+    if (!voices.includes(voiceStyle.value)) voiceStyle.value = voices[0] ?? "xiaoya";
+    voiceChoice.hidden = voices.length === 0;
+    read.disabled = autoRead.disabled = voices.length === 0;
     read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
     if (configuration === undefined) {
       mic.disabled = true;
@@ -349,20 +354,73 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     };
   }
 
+  function releaseClip(narration) {
+    cancelAnimationFrame(narration.captionFrame);
+    narration.audio?.pause();
+    if (narration.url) URL.revokeObjectURL(narration.url);
+    narration.audio = narration.url = undefined;
+  }
+
   function stopPlayback(keepCaption = false) {
     if (!playback) return false;
     const current = playback;
     playback = undefined;
-    clearTimeout(current.timer);
-    cancelAnimationFrame(current.captionFrame);
     if (!keepCaption) caption();
     current.request.abort();
-    current.audio?.pause();
-    if (current.url) URL.revokeObjectURL(current.url);
+    releaseClip(current);
     read.textContent = "朗读回复";
     setVoicePose(null);
     resize();
     return true;
+  }
+
+  async function fetchClip(text, voice, request) {
+    const response = await fetch("/api/pet/speech", {
+      method: "POST", signal: AbortSignal.any([request.signal, AbortSignal.timeout(18000)]),
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify({text, voice})
+    });
+    if (response.redirected || !response.ok || !response.headers.get("content-type")?.startsWith("audio/mpeg")) {
+      const failure = await response.json().catch(() => null);
+      throw new Error(failure?.error || "鲸鱼娘的专用语音暂时连不上，请再点一次朗读。");
+    }
+    return {clip: await response.blob(), voice: response.headers.get("X-TraceTutor-Voice") || voice};
+  }
+
+  async function playClip(narration, clip, prefix, part) {
+    const characters = Array.from(part);
+    narration.url = URL.createObjectURL(clip);
+    const audio = narration.audio = new window.Audio(narration.url), signal = narration.request.signal;
+    let shown = 0, finish;
+    function reveal() {
+      if (playback !== narration || audio.paused || narration.audio !== audio) return;
+      const count = Number.isFinite(audio.duration) && audio.duration > 0
+        ? Math.min(characters.length, 1 + Math.floor(audio.currentTime / audio.duration * characters.length))
+        : 1;
+      if (count > shown) {
+        shown = count;
+        caption(prefix + characters.slice(0, shown).join(""));
+      }
+      if (shown < characters.length) narration.captionFrame = requestAnimationFrame(reveal);
+    }
+    audio.onplaying = () => {
+      if (playback !== narration || narration.audio !== audio) return;
+      note(narration.fallback ? "Xiaoyi 暂不可用，正用小雅继续朗读。" : "");
+      setVoicePose("talk");
+      cancelAnimationFrame(narration.captionFrame);
+      reveal();
+    };
+    try {
+      await new Promise((resolve, reject) => {
+        finish = resolve;
+        signal.addEventListener("abort", finish, {once: true});
+        audio.onended = resolve;
+        audio.onerror = () => reject(new Error("音频未能播放，请再试一次。"));
+        audio.play().catch(reject);
+      });
+    } finally {
+      signal.removeEventListener("abort", finish);
+      if (narration.audio === audio) releaseClip(narration);
+    }
   }
 
   async function readReply(automatic = false) {
@@ -373,61 +431,45 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
     if (read.disabled) return;
     if (stopPlayback() && !automatic) return note("已停止朗读。");
-    const text = message.textContent.slice(0, 260);
-    const characters = Array.from(text);
+    const text = Array.from(message.textContent).slice(0, 260).join("").trim();
+    if (!text) return;
+    const sentences = text.match(/[^。！？!?]+[。！？!?]*|[。！？!?]+/gu);
     const request = new AbortController();
-    const narration = playback = {request, timer: setTimeout(() => request.abort(), 40000)};
+    const narration = playback = {request};
     read.textContent = "停止朗读";
     note("鲸鱼娘正在准备语音。");
     setVoicePose("focus");
+    let voice = voiceStyle.value, completed = "";
+    const prepare = part => fetchClip(part, voice, request).catch(error => ({error}));
     try {
-      const response = await fetch("/api/pet/speech", {
-        method: "POST", signal: request.signal, headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({text})
-      });
-      if (response.redirected || !response.ok || !response.headers.get("content-type")?.startsWith("audio/mpeg")) {
-        const failure = await response.json().catch(() => null);
-        throw new Error(failure?.error || "鲸鱼娘的专用语音暂时连不上，请再点一次朗读。");
-      }
-      const clip = await response.blob();
-      if (playback !== narration) return;
-      clearTimeout(narration.timer);
-      narration.url = URL.createObjectURL(clip);
-      const audio = narration.audio = new window.Audio(narration.url);
-      let shown = 0;
-      function revealCaption() {
-        if (playback !== narration || audio.paused) return;
-        const count = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.min(characters.length, 1 + Math.floor(audio.currentTime / audio.duration * characters.length))
-          : 1;
-        if (count > shown) {
-          shown = count;
-          caption(characters.slice(0, shown).join(""));
-        }
-        if (shown < characters.length) narration.captionFrame = requestAnimationFrame(revealCaption);
-      }
-      audio.onplaying = () => {
+      let pending = prepare(sentences[0]);
+      for (let i = 0; i < sentences.length; i++) {
+        const result = await pending;
         if (playback !== narration) return;
-        note();
-        setVoicePose("talk");
-        cancelAnimationFrame(narration.captionFrame);
-        revealCaption();
-      };
-      audio.onended = () => {
+        if (result.error) throw result.error;
+        narration.fallback ||= voice === "xiaoyi" && result.voice === "xiaoya";
+        voice = result.voice;
+        if (i + 1 < sentences.length) pending = prepare(sentences[i + 1]);
+        await playClip(narration, result.clip, completed, sentences[i]);
         if (playback !== narration) return;
-        stopPlayback(true);
-        caption(text, true);
-      };
-      await audio.play();
+        completed += sentences[i];
+        caption(completed);
+        setVoicePose("focus");
+      }
+      stopPlayback(true);
+      caption(completed, true);
     } catch (error) {
       if (playback !== narration) return;
       stopPlayback();
       note(error.name === "NotAllowedError" ? "请点击「朗读回复」，允许浏览器播放声音。"
-        : error.name === "AbortError" ? "生成语音超时，请再点一次朗读。"
+        : error.name === "TimeoutError" ? "生成语音超时，请再点一次朗读。"
         : error.message || "暂时无法播放，请重试。");
     }
   }
   read.addEventListener("click", () => readReply());
+  voiceStyle.addEventListener("change", () => {
+    if (stopPlayback()) note();
+  });
   function stop() {
     pendingReply = undefined;
     const hadRecording = closeRecording();

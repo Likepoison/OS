@@ -1,4 +1,5 @@
 """Generate the tutor's Mandarin voice inside the demo environment."""
+import asyncio
 from array import array
 from importlib.util import find_spec
 from pathlib import Path
@@ -26,6 +27,27 @@ def available():
             and find_spec("sherpa_onnx") is not None and find_spec("lameenc") is not None)
 
 
+def voices():
+    return (["xiaoya"] if available() else []) + (["xiaoyi"] if find_spec("edge_tts") else [])
+
+
+def spoken_text(text):
+    return re.sub(r"[A-Za-z][A-Za-z0-9]*", lambda word: TERMS.get(word[0].lower(), word[0]), text)
+
+
+def speak_xiaoyi(text):
+    import edge_tts
+
+    async def generate():
+        speech = edge_tts.Communicate(spoken_text(text), "zh-CN-XiaoyiNeural", rate="+4%", pitch="+15Hz")
+        return b"".join([item["data"] async for item in speech.stream() if item["type"] == "audio"])
+
+    audio = asyncio.run(asyncio.wait_for(generate(), timeout=8))
+    if not audio:
+        raise RuntimeError("Online voice returned no audio")
+    return audio
+
+
 def speak(text):
     import lameenc
     import sherpa_onnx
@@ -45,8 +67,7 @@ def speak(text):
         if not config.validate():
             raise ValueError("Invalid character voice model configuration")
         tts = sherpa_onnx.OfflineTts(config)
-    spoken = re.sub(r"[A-Za-z][A-Za-z0-9]*", lambda word: TERMS.get(word[0].lower(), word[0]), text)
-    generated = tts.generate(spoken, sid=0, speed=1.04)
+    generated = tts.generate(spoken_text(text), sid=0, speed=1.04)
     if len(generated.samples) == 0 or generated.sample_rate <= 0:
         raise RuntimeError("Character voice returned no audio")
     samples = array("h", (int(max(-1.0, min(1.0, sample)) * 32767) for sample in generated.samples))

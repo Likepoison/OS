@@ -33,7 +33,7 @@ python app.py
 
 授权后可在助教面板选择本机麦克风，并在录音时查看设备名称和输入音量。若当前设备是「立体声混音」或虚拟输入，请切换到实际使用的内置或耳麦麦克风。
 
-助教回复默认使用 [Piper 小雅普通话女声](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html) 自动朗读，头顶气泡随播放进度逐字显示。面板内可以关闭「自动朗读」或手动重听。
+助教回复默认用 [Piper 小雅](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html) 自动朗读。面板的「朗读音色」可切换到 Xiaoyi，按「朗读回复」可用新音色重听同一句。每句合成后立即播放，气泡随该句的音频进度显示。Xiaoyi 经 [edge-tts](https://github.com/rany2/edge-tts) 在线合成，只发送助教朗读文本。遇到服务超时会提示改用小雅。
 
 新建演示环境时，在 Linux 终端执行一次 `bash .devcontainer/setup-voice.sh`，再启动或重启 `python app.py`。两个语音模型保存在被 Git 忽略的运行目录。尚未安装模型时，支持 Web Speech API 的浏览器可以尝试内置识别，音频可能由浏览器提供方处理。桌宠话术基于当前页提供的结构化实验信息和已发送的提问，DeepSeek 分层反馈仍可从实验结果进入。
 

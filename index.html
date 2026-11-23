@@ -236,6 +236,7 @@ td code { font: 18px var(--mono); }
 .pet-form button { flex: none; }
 .pet-voice { margin: 8px 0 0; }
 .pet-voice .tool-row { margin-bottom: 3px; }
+.pet-voice-choice { display: flex; align-items: center; gap: 8px; margin-block: 6px; }
 .pet-mic-device, .pet-mic-level { display: flex; align-items: center; gap: 8px; margin-block: 6px; }
 .pet-mic-device select, .pet-mic-level meter { flex: 1; min-width: 0; }
 .pet-quiz { margin: 10px 0; padding: 0; border: 0; min-width: 0; }
@@ -369,6 +370,12 @@ td code { font: 18px var(--mono); }
     <div class="tool-row"><button id="pet-mic" class="button" type="button" aria-pressed="false" aria-keyshortcuts="T">语音输入</button>
       <button id="pet-read" class="button" type="button">朗读回复</button>
       <label><input type="checkbox" id="pet-autoread" checked> 自动朗读</label></div>
+    <label class="pet-voice-choice" id="pet-voice-choice" hidden>朗读音色
+      <select id="pet-voice-style">
+        <option value="xiaoya">小雅</option>
+        <option value="xiaoyi">Xiaoyi（在线）</option>
+      </select>
+    </label>
     <label id="pet-mic-devices" class="pet-mic-device" hidden>麦克风
       <select id="pet-mic-device"><option value="">浏览器默认设备</option></select>
     </label>
@@ -828,12 +835,12 @@ api("/api/labs").then(data => {
     byId("filter").append(option.cloneNode(true));
   }
   byId("ai").disabled = !data.ai;
-  voiceConfig = {record: data.voice === true, speak: data.speech === true};
+  voiceConfig = {record: data.voice === true, voices: Array.isArray(data.speech_voices) ? data.speech_voices : []};
   companion?.enableVoice(voiceConfig);
   if (!data.ai) byId("ai").parentElement.title = "配置模型凭据后可启用，当前使用规则提示";
   loadExample(true);
 }).catch(err => {
-  voiceConfig = {record: false, speak: false};
+  voiceConfig = {record: false, voices: []};
   companion?.enableVoice(voiceConfig);
   notice(err.message);
 });

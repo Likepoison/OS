@@ -10,7 +10,7 @@ speech_checksum=9396a3dffbb95b037acaa18094500f58d0db9a7c4f2689554e2539717cf0db65
 
 mkdir -p "$cache"
 python -m pip --disable-pip-version-check install --no-warn-script-location --target "$cache/python" --upgrade \
-  sherpa-onnx==2.0.2 lameenc==1.9.0 imageio-ffmpeg==0.6.0
+  sherpa-onnx==2.0.2 lameenc==1.9.0 imageio-ffmpeg==0.6.0 edge-tts==7.3.1
 if [[ ! -f "$cache/$model/model.int8.onnx" || ! -f "$cache/$model/tokens.txt" ]]; then
   staging=$(mktemp -d "$cache/.download.XXXXXX")
   trap 'rm -rf -- "$staging"' EXIT

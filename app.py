@@ -147,7 +147,7 @@ def run_job(run_id, lab, source, want_ai):
 class Handler(BaseHTTPRequestHandler):
     timeout = 15
 
-    def send_data(self, status, payload, content_type="application/json; charset=utf-8", *, cache_control="no-store"):
+    def send_data(self, status, payload, content_type="application/json; charset=utf-8", *, cache_control="no-store", headers=()):
         if not isinstance(payload, bytes):
             payload = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(status)
@@ -155,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Cache-Control", cache_control)
         self.send_header("X-Content-Type-Options", "nosniff")
+        for name, value in headers:
+            self.send_header(name, value)
         self.send_header("Permissions-Policy", "camera=(), microphone=(self), geolocation=(), display-capture=()")
         self.send_header("Content-Security-Policy",
                          "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; "
@@ -180,10 +182,12 @@ class Handler(BaseHTTPRequestHandler):
             lab = parse_qs(url.query).get("lab", [""])[0]
             return self.pet_memory_request(pet[1], lab=lab)
         if url.path == "/api/labs":
+            voices = pet_speech.voices()
             return self.send_data(200, {
                 "ai": bool(os.getenv("DEEPSEEK_API_KEY")),
                 "voice": voice_available(),
-                "speech": pet_speech.available(),
+                "speech": bool(voices),
+                "speech_voices": voices,
                 "labs": [{"id": key, "title": lab["title"], "summary": lab["summary"],
                           "sample": sample(lab), "broken": sample(lab, broken=True)}
                          for key, lab in LABS.items()],
@@ -309,23 +313,37 @@ class Handler(BaseHTTPRequestHandler):
             size = int(self.headers.get("Content-Length", 0))
             if not 0 < size <= 4096:
                 return self.send_data(413, {"error": "朗读文本超出长度限制。"})
-            text = " ".join(json.loads(self.rfile.read(size))["text"].split())
+            request = json.loads(self.rfile.read(size))
+            text = " ".join(request["text"].split())
+            voice = request.get("voice", "xiaoya")
             if not 0 < len(text) <= 260 or not text.isprintable():
                 raise ValueError
         except (ValueError, KeyError, TypeError, AttributeError, TimeoutError, RecursionError):
             return self.send_data(400, {"error": "请输入 1 至 260 个字符的朗读文本。"})
-        if not pet_speech.available():
+        if voice not in ("xiaoya", "xiaoyi"):
+            return self.send_data(400, {"error": "请选择小雅或 Xiaoyi 音色。"})
+        voices = pet_speech.voices()
+        if voice not in voices:
             return self.send_data(503, {"error": "鲸鱼娘的专用语音暂未就绪。"})
         if not SPEECH_SLOT.acquire(blocking=False):
             return self.send_data(429, {"error": "鲸鱼娘正在生成语音，请稍后再听。"})
         try:
-            audio = pet_speech.speak(text)
+            if voice == "xiaoyi":
+                try:
+                    audio = pet_speech.speak_xiaoyi(text)
+                except Exception as error:
+                    logging.warning("Online tutor voice unavailable (%s)", type(error).__name__)
+                    if "xiaoya" not in voices:
+                        return self.send_data(503, {"error": "在线语音暂不可用，请稍后重试。"})
+                    voice = "xiaoya"
+            if voice == "xiaoya":
+                audio = pet_speech.speak(text)
         except Exception:
             logging.exception("Could not generate character voice")
             return self.send_data(503, {"error": "这次声音没有生成，请再点一次朗读。"})
         finally:
             SPEECH_SLOT.release()
-        return self.send_data(200, audio, "audio/mpeg")
+        return self.send_data(200, audio, "audio/mpeg", headers=(("X-TraceTutor-Voice", voice),))
 
     def do_POST(self):
         if self.path == "/api/pet/voice":
