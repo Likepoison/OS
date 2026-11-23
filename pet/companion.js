@@ -93,7 +93,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     speechReady = configuration !== undefined;
     preferredVoice = configuration?.voices?.[0];
     read.disabled = autoRead.disabled = !preferredVoice;
-    read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
+    read.title = read.disabled ? "当前环境的助教专用语音尚未就绪" : "用助教的声音朗读当前回复";
     if (configuration === undefined) {
       mic.disabled = true;
       mic.title = "正在检查语音服务";
@@ -368,7 +368,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     });
     if (response.redirected || !response.ok || !response.headers.get("content-type")?.startsWith("audio/mpeg")) {
       const failure = await response.json().catch(() => null);
-      throw new Error(failure?.error || "鲸鱼娘的专用语音暂时连不上，请再点一次朗读。");
+      throw new Error(failure?.error || "助教的专用语音暂时连不上，请再点一次朗读。");
     }
     return {clip: await response.blob(), voice: response.headers.get("X-TraceTutor-Voice") || voice};
   }
@@ -425,7 +425,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     const narration = playback = {request};
     caption();
     read.textContent = "停止朗读";
-    note("鲸鱼娘正在准备语音。");
+    note("助教正在准备语音。");
     setVoicePose("focus");
     let voice = preferredVoice, completed = "";
     const prepare = part => fetchClip(part, voice, request).catch(error => ({error}));

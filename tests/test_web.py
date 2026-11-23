@@ -141,8 +141,8 @@ class Demo(TestCase):
                     expect(code).to_have_value(original_code)
                     options.get_by_label("自动换行").uncheck()
                     options.get_by_role("button", name="完成").click()
-                    pet = page.get_by_role("button", name="鲸鱼娘助教")
-                    pet_panel = page.get_by_role("complementary", name="鲸鱼娘助教")
+                    pet = page.get_by_role("button", name="助教", exact=True)
+                    pet_panel = page.get_by_role("complementary", name="助教", exact=True)
                     pet_reply = pet_panel.locator("#pet-reply")
                     portrait = pet.locator(".pet-figure")
                     poster = portrait.locator(".pet-stand")
@@ -185,7 +185,7 @@ class Demo(TestCase):
                     pet_panel.get_by_role("button", name="最后一个写端被关闭后").click()
                     expect(pet_reply).to_contain_text("答对啦")
                     voice = pet_panel.get_by_role("button", name="语音输入")
-                    prompt = pet_panel.get_by_role("textbox", name="问鲸鱼娘")
+                    prompt = pet_panel.get_by_role("textbox", name="问助教")
                     auto_read = pet_panel.get_by_label("自动朗读")
                     expect(auto_read).to_be_checked()
                     auto_read.uncheck()
@@ -259,8 +259,8 @@ class Demo(TestCase):
                         requests.append(request)
 
                     page.on("request", collect)
-                    pet_panel.get_by_role("textbox", name="问鲸鱼娘").fill(user_text)
-                    pet_panel.get_by_role("textbox", name="问鲸鱼娘").press("Enter")
+                    pet_panel.get_by_role("textbox", name="问助教").fill(user_text)
+                    pet_panel.get_by_role("textbox", name="问助教").press("Enter")
                     expect(pet_reply).to_contain_text("我可以陪你看本次结果")
                     self.assertNotIn(user_text, pet_panel.inner_text())
                     self.assertTrue(all("/api/pet/sessions" in req.url or
@@ -301,7 +301,7 @@ class Demo(TestCase):
                         with mobile.expect_request("**/pet/companion.js"):
                             mobile.goto("http://127.0.0.1:8000", wait_until="commit")
                         expect(mobile.get_by_role("button", name="语音提问")).to_be_disabled()
-                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
+                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是助教")
                         pending_script[0].continue_()
                         expect(mobile.get_by_role("button", name="问助教")).to_be_enabled()
                         mobile_pet = mobile.locator("#pet-launch")
@@ -317,7 +317,7 @@ class Demo(TestCase):
                         expect(mobile_pet).to_have_attribute("data-art", "greet")
                         self.assertEqual(mobile_pet.locator(".pet-strip").evaluate("(image) => image.naturalWidth"), 2048)
                         expect(mobile_poster).to_be_hidden()
-                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是鲸鱼娘助教")
+                        expect(mobile.locator("#pet-bubble")).to_contain_text("我是助教")
                         self.assertEqual(mobile.evaluate("document.documentElement.scrollWidth"), 390)
                         expect(mobile.locator(".quote-line")).to_have_css("white-space", "nowrap")
                         self.assertTrue(mobile.locator(".grid > .panel").evaluate_all(
@@ -392,7 +392,7 @@ class Demo(TestCase):
                         cloud_voice.get_by_role("button", name="问助教", exact=True).click()
                         expect(cloud_voice.locator("#pet-memory-status")).to_be_hidden()
                         self.assertEqual(session_requests, [])
-                        cloud_prompt = cloud_voice.get_by_role("textbox", name="问鲸鱼娘")
+                        cloud_prompt = cloud_voice.get_by_role("textbox", name="问助教")
                         cloud_prompt.fill("你好")
                         with cloud_voice.expect_response("**/api/pet/sessions") as session:
                             cloud_prompt.press("Enter")
@@ -636,7 +636,7 @@ class Demo(TestCase):
                     fresh = context.new_page()
                     fresh.goto("http://127.0.0.1:8000")
                     expect(fresh.get_by_role("button", name="运行实验")).to_be_enabled()
-                    fresh.get_by_role("button", name="鲸鱼娘助教").click()
+                    fresh.get_by_role("button", name="助教", exact=True).click()
                     fresh.get_by_role("button", name="本轮回顾").click()
                     expect(fresh.locator("#pet-reply")).to_contain_text("完成 0 次评测、0 次小测作答，提出 0 个问题")
                     deadline = monotonic() + 4

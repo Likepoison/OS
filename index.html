@@ -372,19 +372,19 @@ td code { font: 18px var(--mono); }
   <p class="muted">这些设置只改变编辑器显示。Ctrl + Enter 可运行实验。</p>
   <form class="close-preferences" method="dialog"><button class="button" type="submit">完成</button></form>
 </dialog>
-<button id="pet-launch" class="pet-launch" type="button" aria-label="鲸鱼娘助教" aria-controls="pet-panel"
-  aria-expanded="false" data-motion="true" data-pose="greet" title="鲸鱼娘助教 · 点击打开，可拖动" disabled>
+<button id="pet-launch" class="pet-launch" type="button" aria-label="助教" aria-controls="pet-panel"
+  aria-expanded="false" data-motion="true" data-pose="greet" title="助教 · 点击打开，可拖动" disabled>
   <span class="pet-figure" aria-hidden="true"><img class="pet-stand" src="/pet/whale-stand.webp" alt="" draggable="false"></span>
 </button>
-<p id="pet-bubble" class="pet-bubble" role="status">嗨，我是鲸鱼娘助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
+<p id="pet-bubble" class="pet-bubble" role="status">嗨，我是助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>
-  <div class="pet-head"><h2 id="pet-title" tabindex="-1">鲸鱼娘助教</h2>
+  <div class="pet-head"><h2 id="pet-title" tabindex="-1">助教</h2>
     <button id="pet-close" class="button" type="button">收起</button></div>
   <p id="pet-reply" class="pet-reply" role="status"></p>
   <div class="tool-row" id="pet-actions"></div>
   <p id="pet-memory-status" class="muted" role="status" hidden></p>
   <fieldset class="pet-quiz" id="pet-quiz" hidden><legend id="pet-question"></legend><div id="pet-choices"></div></fieldset>
-  <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问鲸鱼娘" maxlength="100"
+  <form class="pet-form" id="pet-form"><input id="pet-input" aria-label="问助教" maxlength="100"
     placeholder="例如：为什么超时？" autocomplete="off" required><button class="button" type="submit">发送</button></form>
   <p id="pet-heard" class="muted" role="status" hidden></p>
   <div class="pet-voice">

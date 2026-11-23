@@ -413,9 +413,9 @@ class Handler(BaseHTTPRequestHandler):
         if voice not in ("xiaoya", "xiaoyi"):
             return self.send_data(400, {"error": "请选择小雅或 Xiaoyi 音色。"})
         if voice not in voices:
-            return self.send_data(503, {"error": "鲸鱼娘的专用语音暂未就绪。"})
+            return self.send_data(503, {"error": "助教的专用语音暂未就绪。"})
         if not SPEECH_SLOT.acquire(blocking=False):
-            return self.send_data(429, {"error": "鲸鱼娘正在生成语音，请稍后再听。"})
+            return self.send_data(429, {"error": "助教正在生成语音，请稍后再听。"})
         try:
             if voice == "xiaoyi":
                 try:
