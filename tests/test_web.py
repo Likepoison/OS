@@ -235,6 +235,11 @@ class Demo(TestCase):
                         text += sentence
                         expect(pet_bubble).to_have_text(text)
                     expect(pet_panel.get_by_role("button", name="朗读回复")).to_be_enabled()
+                    pet_panel.get_by_label("朗读音色").select_option("xiaoya")
+                    with page.expect_request("**/api/pet/speech"):
+                        pet_panel.get_by_role("button", name="朗读回复").click()
+                    expect(pet_bubble).to_be_hidden()
+                    pet_panel.get_by_role("button", name="停止朗读").click()
                     pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")

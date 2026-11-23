@@ -436,6 +436,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     const sentences = text.match(/[^。！？!?]+[。！？!?]*|[。！？!?]+/gu);
     const request = new AbortController();
     const narration = playback = {request};
+    caption();
     read.textContent = "停止朗读";
     note("鲸鱼娘正在准备语音。");
     setVoicePose("focus");
