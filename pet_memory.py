@@ -18,7 +18,7 @@ def run_id(value):
 
 def clean_event(data):
     kind = data.get("type")
-    if kind == "view" and data.get("view") in ("grade", "trace", "hints", "history"):
+    if kind == "view" and data.get("view") in ("grade", "trace", "hints", "review", "history"):
         total = data.get("total")
         return {"type": kind, "view": data["view"], "total": total if type(total) is int and total >= 0 else None,
                 "run_id": run_id(data.get("run_id"))}
@@ -113,5 +113,7 @@ class StudyMemory:
                 "answers": len(lab_answers),
                 "correct": sum(e["correct"] for e in lab_answers),
                 "score": lab_runs[-1]["score"] if lab_runs else None,
+                "recent_runs": [{"id": e["run_id"], "score": e["score"]}
+                                for e in lab_runs[-12:] if e["run_id"]],
             },
         }

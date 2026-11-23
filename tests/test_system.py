@@ -113,12 +113,13 @@ class Evaluation(TestCase):
             {"type": "view", "view": "trace", "total": 4},
             {"type": "event", "id": 13, "call": "pipe2", "kind": "syscall"},
             {"type": "question", "question": "怎么解释上一条", "reply": "先看参数。"},
-            {"type": "run", "lab": "pipe", "score": [1, 2]},
+            {"type": "run", "lab": "pipe", "score": [1, 2], "run_id": "a" * 32},
             {"type": "answer", "lab": "pipe", "choice": 1, "correct": False},
         ]:
             memory.request(first, event=clean_event(event))
         snapshot = memory.request(first, lab="pipe")
-        self.assertEqual(snapshot["study"], {"runs": 1, "answers": 1, "correct": 0, "score": [1, 2]})
+        self.assertEqual(snapshot["study"], {"runs": 1, "answers": 1, "correct": 0, "score": [1, 2],
+                                            "recent_runs": [{"id": "a" * 32, "score": [1, 2]}]})
         self.assertEqual((snapshot["views"], snapshot["questions"], snapshot["last_event"]["id"]), (1, 1, 13))
         self.assertEqual(snapshot["previous_reply"], "先看参数。")
         self.assertEqual(memory.request(second, lab="pipe")["questions"], 0)
@@ -131,6 +132,19 @@ class Evaluation(TestCase):
         memory.expire()
         with self.assertRaises(KeyError):
             memory.request(second, lab="pipe")
+
+    def test_demo_check_marks_probe_blocked_when_docker_is_unavailable(self):
+        with TemporaryDirectory() as temp, patch.object(app, "DATABASE", Path(temp) / "check.sqlite3"):
+            app.initialize()
+            with patch.object(app.subprocess, "run", side_effect=FileNotFoundError), \
+                 patch.object(app, "ai_hints") as ai, patch.object(app.pet_speech, "speak_xiaoyi") as speak:
+                checks = {row["name"]: row["state"] for row in app.demo_checks(False)["checks"]}
+        self.assertEqual(checks["评测服务与记录库"], "ready")
+        self.assertEqual(checks["Docker 服务"], "error")
+        self.assertEqual(checks["沙箱镜像"], "pending")
+        self.assertEqual(checks["系统调用观测"], "pending")
+        ai.assert_not_called()
+        speak.assert_not_called()
 
     def test_failed_queue_submission_returns_json_and_releases_slot(self):
         slots = BoundedSemaphore(1)

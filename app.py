@@ -19,7 +19,7 @@ from threading import BoundedSemaphore, Thread
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
-from engine import ai_hints, evaluate, events_from
+from engine import IMAGE, ai_hints, evaluate, events_from, sandbox
 from labs import LABS, sample
 from pet_memory import StudyMemory, clean_event
 import pet_speech
@@ -53,6 +53,7 @@ AUDIO_LIMIT = 12 * AUDIO_RATE * 2
 RECORDING_FORMATS = {"audio/webm": "matroska", "audio/ogg": "ogg", "audio/mp4": "mov"}
 VOICE_SLOT = BoundedSemaphore(1)
 SPEECH_SLOT = BoundedSemaphore(1)
+CHECK_SLOT = BoundedSemaphore(1)
 voice_model = None
 logging.basicConfig(level=logging.INFO)
 
@@ -142,6 +143,94 @@ def run_job(run_id, lab, source, want_ai):
             conn.execute("UPDATE runs SET state='platform_error', outcome='platform_error' WHERE id=?", (run_id,))
     finally:
         SLOTS.release()
+
+
+def demo_checks(online):
+    checks = []
+
+    def report(name, state, detail):
+        checks.append({"name": name, "state": state, "detail": detail})
+
+    try:
+        with database() as conn:
+            conn.execute("SELECT id FROM runs LIMIT 1").fetchone()
+        report("评测服务与记录库", "ready", "页面可访问，实验记录库可读。")
+    except sqlite3.Error:
+        logging.exception("Demo check could not read the run database")
+        report("评测服务与记录库", "error", "实验记录库读取失败。")
+
+    evidence = None
+    try:
+        subprocess.run(["docker", "info", "--format", "{{.ServerVersion}}"],
+                       capture_output=True, check=True, timeout=4)
+    except (OSError, subprocess.SubprocessError):
+        report("Docker 服务", "error", "无法连接评测环境的 Docker 服务。")
+        report("沙箱镜像", "pending", "Docker 服务可用后再检测。")
+    else:
+        report("Docker 服务", "ready", "Docker 已响应。")
+        try:
+            subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", IMAGE],
+                           capture_output=True, check=True, timeout=4)
+        except (OSError, subprocess.SubprocessError):
+            report("沙箱镜像", "error", "找不到评测镜像或镜像查询超时。")
+        else:
+            report("沙箱镜像", "ready", IMAGE)
+            try:
+                source = '#include <unistd.h>\nint main(void) { return write(1, "trace-ready\\n", 12) == 12 ? 0 : 1; }'
+                probe = sandbox(source, "", "demo-check")
+                run = probe.get("run", {})
+                code_ok = probe["compile"]["code"] == 0 and run.get("code") == 0 and run.get("stdout") == "trace-ready\n"
+                report("沙箱编译与运行", "ready" if code_ok else "error",
+                       "固定 C 探针编译、执行和输出均通过。" if code_ok else "固定 C 探针未返回预期结果。")
+                evidence = next((event for event in events_from(run.get("trace", "")) if code_ok
+                                 and event.get("call") == "write" and "trace-ready" in event["text"]), None)
+                report("系统调用观测", "ready" if evidence else "error",
+                       f"捕获到真实 write 事件 #{evidence['id']}。" if evidence else "未捕获到可核对的探针写入事件。")
+            except (OSError, RuntimeError, ValueError, KeyError):
+                logging.exception("Demo sandbox probe failed")
+                report("沙箱编译与运行", "error", "固定探针启动失败，请检查容器环境。")
+                report("系统调用观测", "pending", "沙箱可运行后再检测。")
+    if not any(check["name"] == "沙箱编译与运行" for check in checks):
+        report("沙箱编译与运行", "pending", "Docker 和镜像就绪后再检测。")
+        report("系统调用观测", "pending", "沙箱可运行后再检测。")
+
+    voices = pet_speech.voices()
+    recognition = voice_available()
+    report("普通话转写", "configured" if recognition else "missing",
+           "SenseVoice 已安装，浏览器麦克风可在助教面板实测。" if recognition else "SenseVoice 尚未安装。")
+    report("小雅朗读", "configured" if "xiaoya" in voices else "missing",
+           "本地模型已安装。" if "xiaoya" in voices else "本地模型尚未安装。")
+    if "xiaoyi" not in voices:
+        report("Xiaoyi 朗读", "missing", "在线合成依赖尚未安装。")
+    elif not online:
+        report("Xiaoyi 朗读", "configured", "依赖已安装，尚未验证在线响应。")
+    elif not SPEECH_SLOT.acquire(blocking=False):
+        report("Xiaoyi 朗读", "pending", "正在朗读，请稍后重测。")
+    else:
+        try:
+            pet_speech.speak_xiaoyi("语音服务自检。")
+            report("Xiaoyi 朗读", "ready", "在线合成返回了音频。")
+        except Exception as error:
+            logging.warning("Demo online voice probe failed (%s)", type(error).__name__)
+            report("Xiaoyi 朗读", "error", "在线合成不可用或超时。")
+        finally:
+            SPEECH_SLOT.release()
+    if not os.getenv("DEEPSEEK_API_KEY"):
+        report("DeepSeek 提示", "missing", "未配置模型接口密钥。")
+    elif not online:
+        report("DeepSeek 提示", "configured", "密钥已配置，尚未验证模型响应。")
+    elif not evidence:
+        report("DeepSeek 提示", "pending", "需要先取得真实探针轨迹，再验证模型引用。")
+    else:
+        diagnosis = {"code": "probe", "title": "演示自检：使用 write 输出固定文本",
+                     "confidence": "confirmed", "evidence": [evidence["id"]],
+                     "hints": ["哪个调用向标准输出写入数据？", "调用的返回值说明了什么？", "可以用哪条轨迹核对写入？"]}
+        reply = ai_hints("pipe", diagnosis, [evidence])
+        if reply["source"] == "ai":
+            report("DeepSeek 提示", "ready", "模型返回分层提示，且引用了真实探针证据。")
+        else:
+            report("DeepSeek 提示", "error", reply["reason"])
+    return {"checks": checks}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -346,6 +435,24 @@ class Handler(BaseHTTPRequestHandler):
         return self.send_data(200, audio, "audio/mpeg", headers=(("X-TraceTutor-Voice", voice),))
 
     def do_POST(self):
+        if self.path == "/api/demo-check":
+            if self.headers.get_content_type() != "application/json":
+                return self.send_data(415, {"error": "请提交 JSON 格式的检查选项。"})
+            try:
+                size = int(self.headers.get("Content-Length", 0))
+                if not 0 < size <= 256:
+                    return self.send_data(413, {"error": "检查请求过长。"})
+                online = json.loads(self.rfile.read(size)).get("online", False)
+                if type(online) is not bool:
+                    raise ValueError
+            except (ValueError, AttributeError, TimeoutError, RecursionError):
+                return self.send_data(400, {"error": "检查选项格式无效。"})
+            if not CHECK_SLOT.acquire(blocking=False):
+                return self.send_data(429, {"error": "演示自检正在运行，请稍后重试。"})
+            try:
+                return self.send_data(200, demo_checks(online))
+            finally:
+                CHECK_SLOT.release()
         if self.path == "/api/pet/voice":
             return self.pet_voice_request()
         if self.path == "/api/pet/speech":

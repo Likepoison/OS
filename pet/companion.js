@@ -54,6 +54,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     .find(type => Recorder?.isTypeSupported(type));
   const canRecord = Boolean(window.isSecureContext && format && navigator.mediaDevices?.getUserMedia);
   let listener, timeout, recording, playback, pendingReply, speechReady = false, useServer = false;
+  let inputUpdate = 0;
   function note(text = "") {
     status.hidden = !text;
     status.textContent = text;
@@ -175,17 +176,21 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     if (held && listener === active) return release;
   }
 
-  async function refreshInputs() {
+  async function refreshInputs(reportRemoval = false) {
     if (!navigator.mediaDevices.enumerateDevices) return;
+    const version = ++inputUpdate;
     try {
       const entries = await navigator.mediaDevices.enumerateDevices();
-      if (!useServer) return;
+      if (!useServer || version !== inputUpdate) return;
       const inputs = entries.filter(entry => entry.kind === "audioinput" && entry.label &&
         entry.deviceId && entry.deviceId !== "default" && entry.deviceId !== "communications");
       const chosen = device.value;
       device.replaceChildren(new Option("浏览器默认设备", ""), ...inputs.map(entry => new Option(entry.label, entry.deviceId)));
       if (inputs.some(entry => entry.deviceId === chosen)) device.value = chosen;
       devices.hidden = inputs.length === 0;
+      if (reportRemoval && chosen && !device.value && !recording) {
+        note("所选麦克风已断开。请重新选择输入设备，下一次录音使用当前选项。");
+      }
       resize();
     } catch (error) {
       console.debug("Microphone list unavailable", error);
@@ -292,7 +297,14 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
         ...(device.value ? {deviceId: {exact: device.value}} : {})
       }});
       if (recording !== session) return releaseAudio(session);
-      session.deviceName = session.stream.getAudioTracks()[0]?.label || "当前麦克风";
+      const track = session.stream.getAudioTracks()[0];
+      session.deviceName = track?.label || "当前麦克风";
+      track?.addEventListener("ended", () => {
+        if (recording !== session || session.phase !== "listening") return;
+        closeRecording();
+        note("录音设备已断开。请重新选择麦克风后再录音。");
+        refreshInputs();
+      }, {once: true});
       refreshInputs();
       const recorder = session.recorder = new Recorder(session.stream, {
         mimeType: format, audioBitsPerSecond: 24000
@@ -468,6 +480,9 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     }
   }
   read.addEventListener("click", () => readReply());
+  navigator.mediaDevices?.addEventListener("devicechange", () => {
+    if (useServer) refreshInputs(true);
+  });
   voiceStyle.addEventListener("change", () => {
     if (stopPlayback()) note();
   });
@@ -946,6 +961,7 @@ function makeCompanion(activeLab, openResult) {
       (visibleEvents === undefined ? "。" : "，当前筛选匹配 " + visibleEvents + " 条记录。") +
       "用「问助教」查看一条调用的含义，再结合原始日志判断。");
     if (view === "hints") return speak("当前是分层提示。先读观察方向，再打开相关原理或证据定位。");
+    if (view === "review") return speak("当前是诊断复盘。可以从用例跳到证据，再比较同一实验的复跑结果。");
     speak("当前是测试判定。先对照用例输入和输出，再看与失败相关的调用。");
   }
 
@@ -987,6 +1003,7 @@ function makeCompanion(activeLab, openResult) {
     if (run?.hasResult) {
       if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
       contextButtons.push(button(run.ai ? "打开 DeepSeek 提示" : "打开分层提示", () => reveal("hints")));
+      contextButtons.push(button("查看诊断复盘", () => reveal("review")));
     }
     actions.replaceChildren(...contextButtons);
     mood = "idle";
@@ -1255,7 +1272,7 @@ function makeCompanion(activeLab, openResult) {
   }
   avatar.disabled = false;
   for (const control of quickStudy.querySelectorAll('button:not([data-study="voice"])')) control.disabled = false;
-  return {update, observe, explain, recordRun, enableVoice};
+  return {update, observe, explain, recordRun, enableVoice, reviewRuns: lab => memory.read(lab)};
 }
 
 companion = makeCompanion(() => select.value, openPetResult);

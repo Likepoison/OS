@@ -350,10 +350,15 @@ class Demo(TestCase):
                         cloud_voice.add_init_script("""(() => {
                           const media = navigator.mediaDevices;
                           const capture = media.getUserMedia.bind(media);
-                          media.getUserMedia = settings => {
+                          const enumerate = media.enumerateDevices.bind(media);
+                          media.enumerateDevices = async () => (await enumerate()).filter(device =>
+                            device.deviceId !== window.removedMicrophone);
+                          media.getUserMedia = async settings => {
                             window.lastCapture = settings.audio;
-                            if (window.denyMicrophone) return Promise.reject(new DOMException("Blocked", "NotAllowedError"));
-                            return capture(settings);
+                            if (window.denyMicrophone) throw new DOMException("Blocked", "NotAllowedError");
+                            const stream = await capture(settings);
+                            window.lastInputTrack = stream.getAudioTracks()[0];
+                            return stream;
                           };
                         })();""")
 
@@ -439,6 +444,17 @@ class Demo(TestCase):
                         cloud_voice.wait_for_timeout(850)
                         stop.click()
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("几乎没有收到声音")
+                        cloud_voice.evaluate("""id => {
+                          window.removedMicrophone = id;
+                          navigator.mediaDevices.dispatchEvent(new Event("devicechange"));
+                        }""", hardware)
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("所选麦克风已断开")
+                        expect(selected).to_have_value("")
+                        cloud_voice.get_by_role("button", name="语音输入", exact=True).click()
+                        expect(stop).to_be_visible()
+                        cloud_voice.evaluate("() => window.lastInputTrack.dispatchEvent(new Event('ended'))")
+                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("录音设备已断开")
+                        expect(cloud_voice.locator("#pet-mic-level")).to_be_hidden()
                         cloud_voice.evaluate("() => { window.denyMicrophone = true; }")
                         cloud_voice.get_by_role("button", name="语音输入", exact=True).click()
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("本站权限")
@@ -530,7 +546,35 @@ class Demo(TestCase):
                     pet_panel.get_by_role("button", name="本轮回顾").click()
                     expect(pet_reply).to_contain_text("完成 2 次评测、2 次小测作答")
                     expect(pet_reply).to_contain_text("最近关注的是事件 #" + event_number)
-                    pet_panel.get_by_role("button", name="收起").click()
+                    pet_panel.get_by_role("button", name="查看诊断复盘").click()
+                    review = page.locator(".review-steps")
+                    expect(review.get_by_text("0/2 → 2/2 用例通过。", exact=False)).to_be_visible(timeout=15000)
+                    expect(review.get_by_text("运行超时 → 通过", exact=False)).to_be_visible()
+                    evidence_link = review.get_by_role("button", name=re.compile(r"^#\d+ ·")).first
+                    evidence_id = evidence_link.inner_text().split(" ", 1)[0]
+                    evidence_link.click()
+                    focused = page.locator(".event.evidence:focus")
+                    expect(focused).to_contain_text(evidence_id + " ·")
+                    page.get_by_role("button", name="诊断复盘", exact=True).click()
+                    review.get_by_role("button", name="打开后一次运行").click(timeout=15000)
+                    expect(page.locator("#status")).to_have_text("2 / 2 通过")
+                    page.get_by_role("button", name="演示自检", exact=True).click()
+                    demo = page.get_by_role("dialog", name="演示自检")
+                    with page.expect_response("**/api/demo-check", timeout=45000) as health:
+                        demo.get_by_role("button", name="开始自检").click()
+                    checks = {check["name"]: check for check in health.value.json()["checks"]}
+                    self.assertEqual(checks["沙箱编译与运行"]["state"], "ready")
+                    self.assertEqual(checks["系统调用观测"]["state"], "ready")
+                    self.assertEqual(checks["DeepSeek 提示"]["state"], "configured" if live else "missing")
+                    expect(demo.get_by_text("自检完成。")).to_be_visible()
+                    if live:
+                        demo.get_by_label("同时实测 Xiaoyi 和 DeepSeek").check()
+                        with page.expect_response("**/api/demo-check", timeout=45000) as online_check:
+                            demo.get_by_role("button", name="开始自检").click()
+                        model_check = next(row for row in online_check.value.json()["checks"]
+                                           if row["name"] == "DeepSeek 提示")
+                        self.assertEqual(model_check["state"], "ready", model_check["detail"])
+                    demo.get_by_role("button", name="关闭").click()
                     page.get_by_role("button", name="实验记录").click()
                     expect(page.locator("tbody tr")).to_have_count(2)
                     page.get_by_role("button", name="对比最近两次").click()
@@ -555,6 +599,9 @@ class Demo(TestCase):
                     expect(page.get_by_role("heading", name="超过运行时限")).to_be_visible(timeout=30000)
                     expect(page.get_by_text("证据不足", exact=False)).to_be_visible()
                     expect(page.get_by_text("用例输入", exact=True).first).to_be_visible()
+                    page.get_by_role("button", name="诊断复盘", exact=True).click()
+                    expect(review.get_by_text("证据不足", exact=False)).to_be_visible(timeout=15000)
+                    expect(review.get_by_role("button", name=re.compile(r"^#\d+ ·"))).to_have_count(0)
                     with page.expect_response(lambda response: "page=last" in response.url) as tail:
                         page.get_by_role("button", name="查看末尾轨迹").click()
                     self.assertGreater(tail.value.json()["total"], 0)
