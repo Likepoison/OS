@@ -404,14 +404,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_data(413, {"error": "朗读文本超出长度限制。"})
             request = json.loads(self.rfile.read(size))
             text = " ".join(request["text"].split())
-            voice = request.get("voice", "xiaoya")
             if not 0 < len(text) <= 260 or not text.isprintable():
                 raise ValueError
         except (ValueError, KeyError, TypeError, AttributeError, TimeoutError, RecursionError):
             return self.send_data(400, {"error": "请输入 1 至 260 个字符的朗读文本。"})
+        voices = pet_speech.voices()
+        voice = request.get("voice", voices[0] if voices else "xiaoyi")
         if voice not in ("xiaoya", "xiaoyi"):
             return self.send_data(400, {"error": "请选择小雅或 Xiaoyi 音色。"})
-        voices = pet_speech.voices()
         if voice not in voices:
             return self.send_data(503, {"error": "鲸鱼娘的专用语音暂未就绪。"})
         if not SPEECH_SLOT.acquire(blocking=False):

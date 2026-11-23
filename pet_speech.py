@@ -28,7 +28,7 @@ def available():
 
 
 def voices():
-    return (["xiaoya"] if available() else []) + (["xiaoyi"] if find_spec("edge_tts") else [])
+    return (["xiaoyi"] if find_spec("edge_tts") else []) + (["xiaoya"] if available() else [])
 
 
 def spoken_text(text):

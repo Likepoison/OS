@@ -71,7 +71,7 @@ class Demo(TestCase):
 
                     def spoken_configuration(route):
                         config = route.fetch().json()
-                        config.update(voice=False, speech=True, speech_voices=["xiaoya", "xiaoyi"])
+                        config.update(voice=False, speech=True, speech_voices=["xiaoyi", "xiaoya"])
                         route.fulfill(json=config)
 
                     later_speech = []
@@ -204,7 +204,7 @@ class Demo(TestCase):
                     expect(prompt).to_have_value("我的学习进度怎样")
                     expect(pet_reply).to_contain_text("答对啦")
                     expect(pet_panel.get_by_label("自动朗读")).to_be_checked()
-                    pet_panel.get_by_label("朗读音色").select_option("xiaoyi")
+                    expect(pet_panel.get_by_label("朗读音色")).to_have_value("xiaoyi")
                     prompt.dispatch_event("keydown", {"key": "Enter", "code": "Enter", "isComposing": True})
                     expect(prompt).to_have_value("我的学习进度怎样")
                     with page.expect_request("**/api/pet/speech") as spoken, page.expect_request(
@@ -394,6 +394,7 @@ class Demo(TestCase):
                         with cloud_voice.expect_request("**/api/pet/speech") as early_reply:
                             pending_config[0].fulfill(json=config)
                         self.assertIn("你好呀", early_reply.value.post_data_json["text"])
+                        expect(cloud_voice.get_by_label("朗读音色")).to_have_value("xiaoya")
                         expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("朗读测试服务暂不可用")
                         cloud_voice.get_by_label("自动朗读").uncheck()
                         expect(cloud_voice.get_by_role("button", name="运行实验")).to_be_enabled()

@@ -83,7 +83,7 @@ function setupPetVoice(input, message, resize, setVoicePose, caption) {
     speechReady = configuration !== undefined;
     const voices = configuration?.voices ?? [];
     for (const option of voiceStyle.options) option.disabled = !voices.includes(option.value);
-    if (!voices.includes(voiceStyle.value)) voiceStyle.value = voices[0] ?? "xiaoya";
+    if (!voices.includes(voiceStyle.value)) voiceStyle.value = voices[0] ?? "xiaoyi";
     voiceChoice.hidden = voices.length === 0;
     read.disabled = autoRead.disabled = voices.length === 0;
     read.title = read.disabled ? "当前环境的鲸鱼娘专用语音尚未就绪" : "用鲸鱼娘的声音朗读当前回复";
