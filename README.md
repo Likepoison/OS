@@ -25,9 +25,9 @@ python app.py
 
 页头「演示自检」会用固定 C 探针检查 Docker、沙箱和 `strace`。默认显示在线服务配置状态，勾选「同时实测 Xiaoyi 和 DeepSeek」才会发出试探请求，DeepSeek 请求会校验返回的证据引用。「诊断复盘」会连起问题用例、真实调用、分层提示和本页同实验的复跑对照。点击证据编号可定位到原轨迹事件。
 
-「外观设置」可独立切换主题、背景和桌宠活动，可选一张图片在当前页面预览。「代码样式」可调整等宽字体、字号、制表符宽度、换行和底色。编辑器内按 Ctrl + Enter 可运行实验。工作台顶部可直接打开助教、概念小测或学习进度。
+「外观设置」可独立切换主题、背景和小助教活动，可选一张图片在当前页面预览。「代码样式」可调整等宽字体、字号、制表符宽度、换行和底色。编辑器内按 Ctrl + Enter 可运行实验。工作台顶部可直接打开助教、概念小测或学习进度。
 
-「助教」会在进入页面时挥手问好。空闲时会沿页面底部散步，也会张望、坐下、吃饼干、跳跃和打盹。收听语音、等候转写和回答问题时会切换相应动作。鼠标悬停会轮换挥手、循着指针看、蹦跳和坐下。拖动或用方向键可移动她，按 Esc 收起面板。「外观设置」可单独关闭活动和主动气泡。「隐藏桌宠」可收起角色，从页头「显示助教」恢复。
+「小助教」会在进入页面时挥手问好。空闲时会沿页面底部散步，也会张望、坐下、吃饼干、跳跃和打盹。收听语音、等候转写和回答问题时会切换相应动作。鼠标悬停会轮换挥手、循着指针看、蹦跳和坐下。拖动或用方向键可移动她，按 Esc 收起面板。「外观设置」可单独关闭活动和主动气泡。「隐藏小助教」可收起角色，从页头「显示小助教」恢复。
 
 切换到系统调用、分层提示或实验记录时，助教会根据当前页面给出导览。点击某条轨迹的「问助教」，可追问该调用与已观察到的返回状态。「学习进度」按实验汇总本页会话内的评测和小测。「本轮回顾」串起这次看过的轨迹和问答。助教记忆暂存于 Codespace 服务进程内存，每个网页独立。关闭或重载页面会请求删除会话。意外断线后，闲置约 10 分钟会回收。实验记录由评测系统单独保留。
 
@@ -37,7 +37,7 @@ python app.py
 
 助教回复默认用 Xiaoyi 自动朗读。Xiaoyi 经 [edge-tts](https://github.com/rany2/edge-tts) 在线合成，只发送助教朗读文本。在线合成失败时，服务在后台自动使用已安装的 [Piper 小雅](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/vits-piper-zh_CN-xiao_ya-medium.html)。每句合成后立即播放，气泡随该句的音频进度显示。
 
-新建演示环境时，在 Linux 终端执行一次 `bash .devcontainer/setup-voice.sh`，再启动或重启 `python app.py`。两个语音模型保存在被 Git 忽略的运行目录。尚未安装模型时，支持 Web Speech API 的浏览器可以尝试内置识别，音频可能由浏览器提供方处理。桌宠话术基于当前页提供的结构化实验信息和已发送的提问，DeepSeek 分层反馈仍可从实验结果进入。
+新建演示环境时，在 Linux 终端执行一次 `bash .devcontainer/setup-voice.sh`，再启动或重启 `python app.py`。两个语音模型保存在被 Git 忽略的运行目录。尚未安装模型时，支持 Web Speech API 的浏览器可以尝试内置识别，音频可能由浏览器提供方处理。小助教话术基于当前页提供的结构化实验信息和已发送的提问，DeepSeek 分层反馈仍可从实验结果进入。
 
 如果网页 IDE 连接缓慢，在 [Your Codespaces](https://github.com/codespaces) 选择同一个 Codespace，使用 **Open in → Visual Studio Code**。桌面 VS Code 需安装 GitHub Codespaces 扩展并登录，终端依然运行在远端。
 
@@ -73,4 +73,4 @@ python3 app.py
 - [Docker 资源约束](https://docs.docker.com/engine/containers/resource_constraints/)用于配置和实测 CPU、内存、交换空间及进程数上限。
 - [strace 手册](https://man7.org/linux/man-pages/man1/strace.1.html)与 [ptrace 手册](https://man7.org/linux/man-pages/man2/ptrace.2.html)用于跟踪进程树、解码描述符并判定采集和权限边界。
 - 题目提供的 [Go](https://go.dev/doc/)、[PostgreSQL](https://www.postgresql.org/docs/current/installation.html)、[MinIO](https://docs.min.io/aistor/installation/linux/install/) 是参考选项。按需演示使用 Python 和 SQLite。
-- 桌宠交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion) 和 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop) 的活动方式。站立、坐下、移动等全身帧来自 [Coopanion v0.1.10 的 DeepSeek 模型](https://github.com/Pal-AI-Lab/Coopanion/tree/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale)，经透明裁剪、动作编排和 WebP 压缩，添加了饼干与玩耍特效。网页图标使用同版 [DeepSeek 预览图](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)。附[同版 MIT 许可](pet/LICENSE-Coopanion.txt)与[上游素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)。署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。
+- 小助教交互参考 [Coopanion](https://github.com/Pal-AI-Lab/Coopanion) 和 [dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop) 的活动方式。站立、坐下、移动等全身帧来自 [Coopanion v0.1.10 的 DeepSeek 模型](https://github.com/Pal-AI-Lab/Coopanion/tree/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale)，经透明裁剪、动作编排和 WebP 压缩，添加了饼干与玩耍特效。网页图标使用同版 [DeepSeek 预览图](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/web/whale/thumbs/deepseek.png)。附[同版 MIT 许可](pet/LICENSE-Coopanion.txt)与[上游素材声明](https://github.com/Pal-AI-Lab/Coopanion/blob/78a46f83d779836c182d8176234c93c26c02d539/packages/cortico-world-desktop-pet/THIRD_PARTY_NOTICES.md)。署名 Phantivia、角色「溟月」原作者上善无形及女仆版设计者 [ZipZipPipe](https://www.pixiv.net/artworks/148186519)。角色二创沿用 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/)，用于非商业教学演示。图中标志归相应权利方所有。

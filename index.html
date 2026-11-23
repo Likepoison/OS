@@ -291,7 +291,7 @@ td code { font: 18px var(--mono); }
   <div class="header-tools">
     <button type="button" class="button" id="demo-check-open">演示自检</button>
     <button type="button" class="button" id="appearance-open">外观设置</button>
-    <button type="button" class="button" id="pet-restore" hidden>显示助教</button>
+    <button type="button" class="button" id="pet-restore" hidden>显示小助教</button>
   </div>
 </div></header>
 <main>
@@ -358,8 +358,8 @@ td code { font: 18px var(--mono); }
   <label class="file-label" for="background-file">自定义背景图片</label>
   <input type="file" id="background-file" accept="image/png,image/jpeg,image/webp" aria-describedby="background-note">
   <p class="muted" id="background-note" role="status">PNG、JPG 或 WebP，最大 5 MB，仅当前页面预览。</p>
-  <label for="pet-motion">桌宠自由活动 <input type="checkbox" id="pet-motion" checked></label>
-  <label for="pet-proactive">桌宠主动气泡 <input type="checkbox" id="pet-proactive" checked></label>
+  <label for="pet-motion">小助教自由活动 <input type="checkbox" id="pet-motion" checked></label>
+  <label for="pet-proactive">小助教主动气泡 <input type="checkbox" id="pet-proactive" checked></label>
   <form class="close-preferences" method="dialog"><button class="button" type="submit">完成</button></form>
 </dialog>
 <dialog class="preferences" id="editor-settings" aria-labelledby="editor-settings-title">
@@ -372,13 +372,13 @@ td code { font: 18px var(--mono); }
   <p class="muted">这些设置只改变编辑器显示。Ctrl + Enter 可运行实验。</p>
   <form class="close-preferences" method="dialog"><button class="button" type="submit">完成</button></form>
 </dialog>
-<button id="pet-launch" class="pet-launch" type="button" aria-label="助教" aria-controls="pet-panel"
-  aria-expanded="false" data-motion="true" data-pose="greet" title="助教 · 点击打开，可拖动" disabled>
+<button id="pet-launch" class="pet-launch" type="button" aria-label="小助教" aria-controls="pet-panel"
+  aria-expanded="false" data-motion="true" data-pose="greet" title="小助教 · 点击打开，可拖动" disabled>
   <span class="pet-figure" aria-hidden="true"><img class="pet-stand" src="/pet/whale-stand.webp" alt="" draggable="false"></span>
 </button>
-<p id="pet-bubble" class="pet-bubble" role="status">嗨，我是助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
+<p id="pet-bubble" class="pet-bubble" role="status">嗨，我是小助教。可以陪你看实验结果，也可以点「语音提问」和我说话。</p>
 <aside id="pet-panel" class="pet-panel" aria-labelledby="pet-title" hidden>
-  <div class="pet-head"><h2 id="pet-title" tabindex="-1">助教</h2>
+  <div class="pet-head"><h2 id="pet-title" tabindex="-1">小助教</h2>
     <button id="pet-close" class="button" type="button">收起</button></div>
   <p id="pet-reply" class="pet-reply" role="status"></p>
   <div class="tool-row" id="pet-actions"></div>
@@ -396,8 +396,8 @@ td code { font: 18px var(--mono); }
     </label>
     <p id="pet-voice-status" class="muted" role="status" hidden></p>
   </div>
-  <p class="muted pet-help">焦点在输入框外时，按住 T 录音，松开转写。可用方向键移动桌宠，Esc 收起。</p>
-  <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏桌宠</button>
+  <p class="muted pet-help">焦点在输入框外时，按住 T 录音，松开转写。可用方向键移动小助教，Esc 收起。</p>
+  <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏小助教</button>
     <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
 </aside>
 <script>

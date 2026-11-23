@@ -343,9 +343,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             return self.send_data(200, PET_MEMORY.request(token, **kwargs))
         except KeyError:
-            return self.send_data(404, {"error": "本轮桌宠记忆已结束。"})
+            return self.send_data(404, {"error": "本轮小助教记忆已结束。"})
         except OverflowError:
-            return self.send_data(429, {"error": "本轮桌宠记忆已满。请先回顾已记录内容。"})
+            return self.send_data(429, {"error": "本轮小助教记忆已满。请先回顾已记录内容。"})
 
     def pet_voice_request(self):
         content_type = self.headers.get_content_type()
@@ -462,7 +462,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_data(415, {"error": "请提交 JSON"})
             token = PET_MEMORY.create()
             if token is None:
-                return self.send_data(503, {"error": "桌宠会话暂时已满。"})
+                return self.send_data(503, {"error": "小助教会话暂时已满。"})
             return self.send_data(HTTPStatus.CREATED, {"id": token})
         if pet := PET_ROUTE.fullmatch(self.path):
             if pet[2] == "close":
@@ -475,11 +475,11 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 size = int(self.headers.get("Content-Length", 0))
                 if not 0 < size <= 4096:
-                    return self.send_data(413, {"error": "桌宠记录超出限制。"})
+                    return self.send_data(413, {"error": "小助教记录超出限制。"})
                 data = json.loads(self.rfile.read(size))
                 event = clean_event(data)
             except (ValueError, TypeError, AttributeError, TimeoutError, RecursionError):
-                return self.send_data(400, {"error": "桌宠记录格式无效。"})
+                return self.send_data(400, {"error": "小助教记录格式无效。"})
             return self.pet_memory_request(pet[1], event=event)
         if self.path != "/api/runs":
             return self.send_data(404, {"error": "地址不存在"})
