@@ -539,6 +539,7 @@ function makeCompanion(activeLab, openResult) {
   const greeting = bubble.textContent;
   const figure = avatar.querySelector(".pet-figure");
   const readyArtwork = new Map(), artworkFailures = new Map();
+  const activities = [["walk", 2040], ["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
   let loadingArtwork, shownArtwork;
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
@@ -577,7 +578,12 @@ function makeCompanion(activeLab, openResult) {
     delete avatar.dataset.art;
     shownArtwork?.remove();
     shownArtwork = undefined;
-    if (pose === "stand" || (voicePose && voicePose !== "talk") || loadingArtwork || avatar.hidden || document.hidden ||
+    if (pose !== "stand") loadArtwork(pose);
+    else if (greeted && panel.hidden) loadArtwork(activities[activityIndex % activities.length][0]);
+  }
+
+  function loadArtwork(pose) {
+    if (readyArtwork.has(pose) || (voicePose && voicePose !== "talk") || loadingArtwork || avatar.hidden || document.hidden ||
         !motion.checked || reducedMotion.matches || (artworkFailures.get(pose) || 0) >= 2) return;
     const image = loadingArtwork = new Image();
     image.className = "pet-strip";
@@ -613,6 +619,7 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function setPose(pose, duration = 0) {
+    if (pose !== "walk") stopRoaming(false);
     clearTimeout(poseTimer);
     if (pose !== "look") clearHoverGaze();
     avatar.dataset.pose = pose;
@@ -730,14 +737,27 @@ function makeCompanion(activeLab, openResult) {
     place(panel);
   }
 
-  function stopRoaming() {
-    if (avatar.dataset.roaming !== "true") return;
-    const {left, top} = avatar.getBoundingClientRect();
+  function clearRoaming() {
     clearTimeout(roamTimeout);
     delete avatar.dataset.roaming;
+  }
+
+  function stopRoaming(restorePose = true) {
+    if (avatar.dataset.roaming !== "true") return;
+    const {left, top} = avatar.getBoundingClientRect();
+    clearRoaming();
     move(left, top);
+    if (restorePose) updateAppearance();
+  }
+
+  function finishRoaming() {
+    clearRoaming();
     updateAppearance();
   }
+
+  avatar.addEventListener("transitionend", event => {
+    if (event.target === avatar && event.propertyName === "left" && avatar.dataset.roaming === "true") finishRoaming();
+  });
 
   function goHome() {
     stopRoaming();
@@ -768,11 +788,14 @@ function makeCompanion(activeLab, openResult) {
     }
     if (!motion.checked || reducedMotion.matches || mood === "working" ||
       (!bubble.hidden && bubble.dataset.kind !== "welcome")) return;
-    const activities = [["walk", 1900], ["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
     const [action, duration] = activities[activityIndex++ % activities.length];
     const canWalk = !manuallyPlaced && !avatar.matches(":hover, :focus-visible") && idle > 1100;
     if (action !== "walk" || !canWalk) {
       setPose(action === "walk" ? "look" : action, duration);
+      return;
+    }
+    if (!readyArtwork.has("walk")) {
+      loadArtwork("walk");
       return;
     }
     if (!bubble.hidden) hideBubble();
@@ -781,10 +804,12 @@ function makeCompanion(activeLab, openResult) {
     const homeY = innerHeight - avatar.offsetHeight - parseFloat(style.getPropertyValue("--pet-bottom"));
     roamingLeft = !roamingLeft;
     avatar.dataset.facing = roamingLeft ? "left" : "right";
+    // Play three complete stride cycles and settle when the horizontal transition ends.
+    avatar.style.setProperty("--roam-duration", duration + "ms");
+    setPose("walk");
     avatar.dataset.roaming = "true";
-    setPose("walk", duration);
     move(homeX - (roamingLeft ? Math.min(330, innerWidth * .26) : 0), homeY);
-    roamTimeout = setTimeout(() => { delete avatar.dataset.roaming; }, 1900);
+    roamTimeout = setTimeout(finishRoaming, duration + 100);
   }
   function startPatrol() {
     clearInterval(patrolTimer);

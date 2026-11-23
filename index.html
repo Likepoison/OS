@@ -202,7 +202,7 @@ td code { font: 18px var(--mono); }
 .pet-launch[data-pose="focus"] .pet-figure { --cycle: 2.2s; }
 .pet-launch[data-pose="drag"] .pet-figure { --cycle: .8s; }
 @media (prefers-reduced-motion: no-preference) {
-  .pet-launch[data-roaming="true"] { transition: left 1.85s ease-in-out, top 1.85s ease-in-out; }
+  .pet-launch[data-roaming="true"] { transition: left var(--roam-duration) cubic-bezier(.22, .16, .78, .84); }
   .pet-launch[data-motion="true"][data-art] .pet-strip { animation: pet-frames var(--cycle) steps(8, jump-none) infinite; }
   .pet-launch[data-motion="true"][data-art="look"][data-gaze="pointer"] .pet-strip {
     animation: none; transform: translateX(var(--gaze-frame, 0%));
@@ -213,13 +213,14 @@ td code { font: 18px var(--mono); }
   .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="greet"], [data-pose="look"], [data-pose="talk"]) .pet-figure {
     animation: pet-hello 1.4s ease-in-out;
   }
-  .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="walk"], [data-pose="play"]) .pet-figure {
+  .pet-launch[data-motion="true"]:not([data-art])[data-pose="play"] .pet-figure {
     animation: pet-step .55s ease-in-out infinite;
   }
   .pet-launch[data-motion="true"]:not([data-art]):is([data-pose="sit"], [data-pose="sleep"]) .pet-figure {
     scale: 1 .94; animation: pet-breathe 3.2s ease-in-out infinite;
   }
   .pet-launch[data-motion="true"][data-pose="snack"] .pet-strip { animation-iteration-count: 1; animation-fill-mode: forwards; }
+  .pet-launch[data-motion="true"] .pet-figure { transition: filter .16s ease-out; }
   .pet-launch[data-motion="true"]:hover .pet-figure { filter: drop-shadow(0 5px 8px #365ad267); }
 }
 @keyframes pet-frames { from { transform: translateX(0); } to { transform: translateX(-87.5%); } }

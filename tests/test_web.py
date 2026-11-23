@@ -324,14 +324,15 @@ class Demo(TestCase):
                             "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
                         mobile.mouse.move(20, 120)
                         home = mobile_pet.bounding_box()["x"]
-                        mobile.route("**/pet/whale-walk.webp", lambda route: route.fulfill(
-                            content_type="image/webp", body=b"invalid sprite"))
-                        with mobile.expect_response("**/pet/whale-walk.webp"):
+                        pending_walk = []
+                        mobile.route("**/pet/whale-walk.webp", lambda route: pending_walk.append(route))
+                        with mobile.expect_request("**/pet/whale-walk.webp"):
                             mobile.clock.run_for(5700)
-                        expect(mobile_pet).to_have_attribute("data-roaming", "true")
+                        expect(mobile_pet).not_to_have_attribute("data-roaming", "true")
                         expect(mobile_poster).to_be_visible()
                         expect(mobile_pet.locator(".pet-strip")).to_have_count(0)
-                        self.assertLess(float(mobile_pet.evaluate("(el) => parseFloat(el.style.left)")), home - 40)
+                        self.assertAlmostEqual(mobile_pet.bounding_box()["x"], home, delta=1)
+                        pending_walk[0].fulfill(content_type="image/webp", body=b"invalid sprite")
                         mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "look")
                         mobile.clock.run_for(5200)
@@ -351,6 +352,33 @@ class Demo(TestCase):
                         expect(mobile.locator("#pet-bubble")).to_be_hidden()
                     finally:
                         mobile.close()
+                    walking = context.new_page()
+                    try:
+                        walking.clock.install()
+                        with walking.expect_response("**/pet/whale-walk.webp"):
+                            walking.goto("http://127.0.0.1:8000")
+                            walking.clock.run_for(2600)
+                        walking_pet = walking.locator("#pet-launch")
+                        home_x = walking_pet.bounding_box()["x"]
+                        walking.clock.run_for(3000)
+                        expect(walking_pet).to_have_attribute("data-roaming", "true")
+                        expect(walking_pet).to_have_attribute("data-art", "walk")
+                        expect(walking_pet).to_have_attribute("data-facing", "left")
+                        expect(walking_pet.locator(".pet-strip")).to_have_css("animation-name", "pet-frames")
+                        expect(walking_pet.locator(".pet-stand")).to_be_hidden()
+                        self.assertLess(float(walking_pet.evaluate("(el) => parseFloat(el.style.left)")), home_x - 40)
+                        walking.clock.run_for(2200)
+                        expect(walking_pet).not_to_have_attribute("data-roaming", "true")
+                        expect(walking_pet).to_have_attribute("data-pose", "stand")
+                        walking.clock.run_for(29100)
+                        expect(walking_pet).to_have_attribute("data-roaming", "true")
+                        expect(walking_pet).to_have_attribute("data-art", "walk")
+                        expect(walking_pet).to_have_attribute("data-facing", "right")
+                        walking.get_by_role("button", name="问助教").click()
+                        expect(walking_pet).not_to_have_attribute("data-roaming", "true")
+                        expect(walking_pet).to_have_attribute("data-pose", "stand")
+                    finally:
+                        walking.close()
                     cloud_voice = context.new_page()
                     try:
                         pending_config = []
