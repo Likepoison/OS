@@ -253,7 +253,7 @@ td code { font: 18px var(--mono); }
 .pet-quiz button { display: flex; width: 100%; margin-bottom: 5px; text-align: left; }
 .pet-quiz button:disabled { cursor: default; }
 .pet-help { margin-top: 9px; }
-.pet-controls { display: flex; flex-wrap: wrap; gap: 12px; }
+.pet-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .preferences::backdrop { background: #26395640; }
 @media (max-width: 1120px) {
   .quote { order: 1; margin: 0; flex-basis: 100%; padding-bottom: 8px; }
@@ -398,8 +398,8 @@ td code { font: 18px var(--mono); }
     <p id="pet-voice-status" class="muted" role="status" hidden></p>
   </div>
   <p class="muted pet-help">按住T可语音输入。可用方向键移动小助教，Esc 收起</p>
-  <div class="pet-controls"><button id="pet-hide" class="tab" type="button">隐藏助教</button>
-    <button id="pet-reset" class="tab" type="button" hidden>回到角落</button></div>
+  <div class="pet-controls"><button id="pet-hide" class="button" type="button">隐藏助教</button>
+    <button id="pet-reset" class="button" type="button" hidden>回到角落</button></div>
 </aside>
 <script>
 const byId = id => document.getElementById(id);
