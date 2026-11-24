@@ -400,8 +400,18 @@ class Demo(TestCase):
                     try:
                         walking.set_viewport_size({"width": 390, "height": 844})
                         walking.clock.install()
+                        walking.add_init_script("""document.addEventListener("DOMContentLoaded", () => {
+                          const pet = document.getElementById("pet-launch");
+                          window.walks = [];
+                          new MutationObserver(() => {
+                            if (pet.dataset.roaming === "true" && pet.dataset.art === "walk") {
+                              window.walks.push({facing: pet.dataset.facing, target: parseFloat(pet.style.left)});
+                            }
+                          }).observe(pet, {attributeFilter: ["data-roaming"]});
+                        });""")
                         with walking.expect_response("**/pet/whale-walk.webp"):
                             walking.goto("http://127.0.0.1:8000")
+                            walking.mouse.move(180, 80)
                             walking.clock.run_for(2600)
                         walking_pet = walking.locator("#pet-launch")
                         home_x = walking_pet.bounding_box()["x"]
@@ -415,14 +425,12 @@ class Demo(TestCase):
                         walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-pose", "stand")
-                        walking.clock.run_for(29100)
-                        expect(walking_pet).to_have_attribute("data-roaming", "true")
-                        expect(walking_pet).to_have_attribute("data-art", "walk")
-                        expect(walking_pet).to_have_attribute("data-facing", "right")
-                        self.assertAlmostEqual(float(walking_pet.evaluate("el => parseFloat(el.style.left)")), home_x, delta=1)
-                        walking.get_by_role("button", name="问助教").click()
+                        walking.clock.run_for(36100)
+                        legs = walking.evaluate("window.walks")
+                        self.assertEqual([leg["facing"] for leg in legs], ["left", "right"])
+                        self.assertAlmostEqual(legs[0]["target"], 8, delta=1)
+                        self.assertAlmostEqual(legs[1]["target"], home_x, delta=1)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
-                        expect(walking_pet).to_have_attribute("data-pose", "stand")
                     finally:
                         walking.close()
                     cloud_voice = context.new_page()
