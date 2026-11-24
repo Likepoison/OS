@@ -317,7 +317,7 @@ td code { font: 18px var(--mono); }
   <div class="grid">
     <section class="panel" aria-labelledby="code-title">
       <div class="panel-head"><h2 id="code-title">源代码 <span class="muted">· main.c</span></h2>
-        <div class="tool-row"><button class="button" id="editor-open" type="button">代码样式</button><button class="button" id="good" type="button">正确样例</button><button class="button" id="bad" type="button">故障样例</button></div>
+        <div class="tool-row"><button class="button" id="editor-open" type="button">代码样式</button><button class="button" id="good" type="button" disabled>正确样例</button></div>
       </div>
       <div class="editor"><pre id="numbers" aria-hidden="true">1</pre><textarea id="source" aria-label="C 源代码" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea></div>
       <div class="panel-foot"><label class="ai-option"><input type="checkbox" id="ai" disabled> 请求 AI 提示</label>
@@ -431,6 +431,8 @@ const labels = {
 let labs = [], record, tab = "grade", polling = false, caseIndex = 0, onlyEvidence = false, viewVersion = 0;
 let historyVersion = 0, pair = [];
 let companion, voiceConfig;
+const drafts = new Map(), sampleButton = byId("good");
+let showingSample = false, sampleRequest;
 const el = (tag, text, cls) => {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -518,14 +520,45 @@ function setupPreferences() {
     lines();
   });
 }
-function loadExample(broken) {
+function showSource(code) {
+  source.value = code;
+  source.setSelectionRange(0, 0);
+  source.scrollTop = source.scrollLeft = 0;
+  lines();
+}
+function loadExercise() {
   const lab = labs.find(item => item.id === select.value);
   if (!lab) return;
-  source.value = broken ? lab.broken : lab.sample;
-  source.scrollTop = 0;
+  sampleRequest = undefined;
+  showingSample = false;
+  sampleButton.textContent = "正确样例";
+  sampleButton.disabled = false;
   byId("summary").textContent = lab.summary;
-  lines();
+  showSource(drafts.get(lab.id) ?? lab.starter);
   if (!polling) byId("run").disabled = false;
+}
+async function toggleSample() {
+  if (showingSample) return loadExercise();
+  sampleButton.disabled = true;
+  const request = sampleRequest = api("/api/labs/sample?lab=" + encodeURIComponent(select.value), {
+    signal: AbortSignal.timeout(8000)
+  });
+  try {
+    const answer = await request;
+    if (sampleRequest !== request) return;
+    showingSample = true;
+    sampleButton.textContent = "返回练习";
+    showSource(answer.source);
+  } catch (error) {
+    if (sampleRequest === request) {
+      notice(error.name === "TimeoutError" ? "正确样例加载超时，请重试。" : error.message);
+    }
+  } finally {
+    if (sampleRequest === request) {
+      sampleRequest = undefined;
+      sampleButton.disabled = false;
+    }
+  }
 }
 function navigate(history) {
   byId("workspace").hidden = history;
@@ -609,8 +642,9 @@ function render(initialTracePage = 0, traceFocus) {
   }
   if (tab === "hints") {
     const fb = result.feedback;
-    const src = fb.source === "ai" ? "AI · " + fb.model : "规则提示" + (fb.reason ? " · " + fb.reason : "");
-    contents.append(el("p", src, "muted"));
+    if (fb.source !== "ai") {
+      contents.append(el("p", "规则提示" + (fb.reason ? " · " + fb.reason : ""), "muted"));
+    }
     fb.hints.forEach((hint, i) => {
       const item = el("details", undefined, "hint");
       item.open = i === 0;
@@ -941,10 +975,12 @@ byId("work-tab").addEventListener("click", () => navigate(false));
 byId("history-tab").addEventListener("click", () => navigate(true));
 byId("filter").addEventListener("change", refreshHistory);
 byId("compare").addEventListener("click", compareRuns);
-byId("good").addEventListener("click", () => loadExample(false));
-byId("bad").addEventListener("click", () => loadExample(true));
-select.addEventListener("change", () => loadExample(false));
-source.addEventListener("input", lines);
+sampleButton.addEventListener("click", toggleSample);
+select.addEventListener("change", loadExercise);
+source.addEventListener("input", () => {
+  if (!showingSample && select.value) drafts.set(select.value, source.value);
+  lines();
+});
 source.addEventListener("scroll", () => { byId("numbers").scrollTop = source.scrollTop; });
 source.addEventListener("keydown", event => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.isComposing) {
@@ -982,7 +1018,7 @@ api("/api/labs").then(data => {
   voiceConfig = {record: data.voice === true, voices: Array.isArray(data.speech_voices) ? data.speech_voices : []};
   companion?.enableVoice(voiceConfig);
   if (!data.ai) byId("ai").parentElement.title = "配置模型凭据后可启用，当前使用规则提示";
-  loadExample(true);
+  loadExercise();
 }).catch(err => {
   voiceConfig = {record: false, voices: []};
   companion?.enableVoice(voiceConfig);

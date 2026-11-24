@@ -28,7 +28,12 @@ class Demo(TestCase):
                 while True:
                     try:
                         with urlopen("http://127.0.0.1:8000/api/labs", timeout=1) as rs:
-                            self.assertEqual(len(json.load(rs)["labs"]), 6)
+                            labs = json.load(rs)["labs"]
+                            self.assertEqual(len(labs), 6)
+                            for lab in labs:
+                                self.assertIn("请填写", lab["starter"])
+                                self.assertNotIn("sample", lab)
+                                self.assertNotIn("broken", lab)
                         break
                     except URLError:
                         if monotonic() >= deadline or server.poll() is not None:
@@ -92,12 +97,27 @@ class Demo(TestCase):
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
                     source = page.locator("#source")
+                    answer = page.get_by_role("button", name="正确样例", exact=True)
+                    expect(source).to_have_value(re.compile("关闭父进程不使用的管道端"))
+                    expect(page.get_by_role("button", name="故障样例", exact=True)).to_have_count(0)
+                    pipe_starter = source.input_value()
                     source.fill("first line")
                     source.press("End")
                     source.press("Enter")
                     expect(source).to_have_value("first line\n")
                     expect(page.locator("#status")).to_have_text("待提交")
-                    page.locator("#bad").click()
+                    with page.expect_request("**/api/labs/sample?lab=pipe"):
+                        answer.click()
+                    back_to_practice = page.get_by_role("button", name="返回练习")
+                    expect(back_to_practice).to_be_enabled()
+                    expect(source).to_have_value(re.compile(r"close\(fd\[1\]\);  /\* Parent write end \*/"))
+                    back_to_practice.click()
+                    expect(source).to_have_value("first line\n")
+                    page.locator("#lab").select_option("deadlock")
+                    expect(source).to_have_value(re.compile("用一致的加锁顺序"))
+                    page.locator("#lab").select_option("pipe")
+                    expect(source).to_have_value("first line\n")
+                    source.fill(pipe_starter)
                     self.assertEqual(page.locator(".grid > .panel").evaluate_all(
                         "(nodes) => new Set(nodes.map(n => n.getBoundingClientRect().bottom)).size"), 1)
                     quote = page.locator("#quote")
@@ -503,7 +523,12 @@ class Demo(TestCase):
                         Path(out).mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=f"{out}/workspace.png", full_page=True)
 
-                    page.get_by_role("button", name="故障样例").click()
+                    wrong_source = pipe_starter.replace(
+                        "/* 请填写：关闭父进程不使用的管道端，使读取有机会收到 EOF。 */",
+                        "/* 遗漏了关闭操作 */",
+                    )
+                    self.assertNotEqual(wrong_source, pipe_starter)
+                    source.fill(wrong_source)
                     if live:
                         page.get_by_label("请求 AI 提示").check()
                     held = []
@@ -512,14 +537,18 @@ class Demo(TestCase):
 
                     page.route("**/api/runs", lambda route: held.append(route))
                     with page.expect_response(lambda response: is_submission(response.request)) as submitted:
-                        with page.expect_request(is_submission):
+                        with page.expect_request(is_submission) as submission:
                             code.press("Control+Enter")
-                        page.get_by_role("button", name="正确样例").click()
+                        self.assertEqual(submission.value.post_data_json["source"], wrong_source)
+                        answer.click()
+                        expect(back_to_practice).to_be_enabled()
                         expect(run).to_be_disabled()
                         expect(pet).to_have_attribute("data-mood", "working")
                         expect(pet).to_have_attribute("data-pose", "focus")
                         expect(portrait.locator(".pet-strip")).to_have_css("animation-name", "pet-frames", timeout=10000)
                         expect(pet_bubble).to_be_visible()
+                        back_to_practice.click()
+                        expect(source).to_have_value(wrong_source)
                         held[0].continue_()
                     page.unroute("**/api/runs")
                     run_id = submitted.value.json()["id"]
@@ -530,7 +559,7 @@ class Demo(TestCase):
                     expect(pet_reply).to_contain_text("有运行线索")
                     if out:
                         page.screenshot(path=f"{out}/companion.png", full_page=True)
-                    pet_panel.get_by_role("button", name="打开 DeepSeek 提示" if live else "打开分层提示").click()
+                    pet_panel.get_by_role("button", name="打开提示", exact=True).click()
                     expect(page.get_by_role("button", name="分层提示", exact=True)).to_have_attribute("aria-pressed", "true")
                     page.get_by_role("button", name="测试判定").click()
                     page.get_by_role("button", name="查看关联事件").click()
@@ -554,7 +583,9 @@ class Demo(TestCase):
                         self.assertEqual(feedback["source"], "ai", feedback.get("reason"))
                         self.assertEqual(set(feedback["evidence"]), set(report["diagnosis"]["evidence"]))
                         self.assertEqual(len(feedback["hints"]), 3)
-                        expect(page.get_by_text("AI · " + feedback["model"], exact=True)).to_be_visible()
+                        expect(page.get_by_text("AI · " + feedback["model"], exact=True)).to_have_count(0)
+                        expect(page.get_by_text("观察方向", exact=True)).to_be_visible()
+                        expect(page.get_by_text("相关原理", exact=True)).to_be_visible()
                         print(json.dumps({"model": feedback["model"], "usage": feedback["usage"],
                                           "duration_ms": feedback["duration_ms"],
                                           "verified_evidence": len(feedback["evidence"])}, ensure_ascii=False))
@@ -568,7 +599,8 @@ class Demo(TestCase):
                     expect(pet_reply).to_contain_text("事件 #" + event_number)
                     pet_panel.get_by_role("button", name="收起").click()
 
-                    page.get_by_role("button", name="正确样例").click()
+                    answer.click()
+                    expect(back_to_practice).to_be_enabled()
                     run.click()
                     expect(page.get_by_text("2 / 2 通过", exact=True)).to_be_visible(timeout=30000)
                     expect(pet).to_have_attribute("data-mood", "success")

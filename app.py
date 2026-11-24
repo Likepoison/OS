@@ -278,9 +278,14 @@ class Handler(BaseHTTPRequestHandler):
                 "speech": bool(voices),
                 "speech_voices": voices,
                 "labs": [{"id": key, "title": lab["title"], "summary": lab["summary"],
-                          "sample": sample(lab), "broken": sample(lab, broken=True)}
+                          "starter": lab["starter"]}
                          for key, lab in LABS.items()],
             })
+        if url.path == "/api/labs/sample":
+            lab = LABS.get(parse_qs(url.query).get("lab", [""])[0])
+            if lab is None:
+                return self.send_data(404, {"error": "找不到该实验的正确样例。"})
+            return self.send_data(200, {"source": sample(lab)})
         if url.path == "/api/runs":
             lab = parse_qs(url.query).get("lab", [""])[0]
             with database() as conn:

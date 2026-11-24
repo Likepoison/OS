@@ -1003,7 +1003,7 @@ function makeCompanion(activeLab, openResult) {
     contextButtons[0].id = "pet-quiz-start";
     if (run?.hasResult) {
       if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
-      contextButtons.push(button(run.ai ? "打开 DeepSeek 提示" : "打开分层提示", () => reveal("hints")));
+      contextButtons.push(button("打开提示", () => reveal("hints")));
       contextButtons.push(button("查看诊断复盘", () => reveal("review")));
     }
     actions.replaceChildren(...contextButtons);

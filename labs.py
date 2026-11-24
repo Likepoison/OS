@@ -1,11 +1,17 @@
-"""Six exercises with fixed output contracts and editable C samples."""
+"""Six C exercises with editable starters and fixed output contracts."""
 from textwrap import dedent
 
 
-def lab(title, summary, source, fault, normal, boundary, required):
+def lab(title, summary, source, fault, normal, boundary, required, *, task):
+    lines = (dedent(source).strip() + "\n").splitlines(keepends=True)
+    markers = [line.strip() for line in lines]
+    start = markers.index("/* practice:start */")
+    end = markers.index("/* practice:end */", start + 1)
+    prompt = lines[start].replace("practice:start", f"请填写：{task}")
     return {
         "title": title, "summary": summary, "required": required,
-        "sample": dedent(source).strip() + "\n",
+        "starter": "".join([*lines[:start], prompt, *lines[end + 1:]]),
+        "sample": "".join([*lines[:start], *lines[start + 1:end], *lines[end + 1:]]),
         "fault": fault,
         "cases": [
             {"name": "常规用例", "stdin": normal[0], "expected": normal[1]},
@@ -37,7 +43,9 @@ LABS = {
                 close(fd[1]);
                 _exit(0);
             }
+            /* practice:start */
             close(fd[1]);  /* Parent write end */
+            /* practice:end */
             ssize_t n;
             while ((n = read(fd[0], buffer, sizeof buffer)) > 0)
                 if (write(STDOUT_FILENO, buffer, (size_t)n) != n) return 2;
@@ -50,6 +58,7 @@ LABS = {
         ("close(fd[1]);  /* Parent write end */", "/* Parent write end left open */"),
         ("kernel lab\n", "kernel lab\n"), ("", ""),
         (("pipe", "pipe2"), ("clone", "fork", "vfork"), ("wait4", "waitid")),
+        task="关闭父进程不使用的管道端，使读取有机会收到 EOF。",
     ),
     "file": lab(
         "文件读写", "将一行输入写入临时文件，再通过文件描述符读回并输出。空输入也要正确处理。",
@@ -65,7 +74,9 @@ LABS = {
             if (fd < 0) return 1;
             while (read(STDIN_FILENO, &value, 1) == 1)
                 if (write(fd, &value, 1) != 1) return 2;
+            /* practice:start */
             if (lseek(fd, 0, SEEK_SET) < 0) return 3;
+            /* practice:end */
             ssize_t size;
             while ((size = read(fd, &value, 1)) > 0)
                 if (write(STDOUT_FILENO, &value, 1) != 1) return 4;
@@ -75,6 +86,7 @@ LABS = {
         ("if (lseek(fd, 0, SEEK_SET) < 0) return 3;", "close(fd);\n    if (lseek(fd, 0, SEEK_SET) < 0) return 3;"),
         ("file demo\n", "file demo\n"), ("", ""),
         (),
+        task="把文件偏移移回开头，并处理定位失败。",
     ),
     "mutex": lab(
         "线程同步", "两个工作线程各增加共享计数 N 次，各自用一次 write 输出 worker A 或 worker B（顺序不限）。主线程等待两者结束后输出 2N。",
@@ -89,9 +101,11 @@ LABS = {
         static void *worker(void *arg) {
             const char *marker = *(const char *)arg == 'A' ? "worker A\n" : "worker B\n";
             for (int i = 0; i < iterations; ++i) {
+                /* practice:start */
                 pthread_mutex_lock(&lock);
                 ++count;
                 pthread_mutex_unlock(&lock);
+                /* practice:end */
             }
             if (write(STDOUT_FILENO, marker, 9) != 9) return (void *)1;
             return NULL;
@@ -109,6 +123,7 @@ LABS = {
         """,
         ("pthread_mutex_unlock(&lock);", "/* Lock remains held */"),
         ("8\n", "worker A\nworker B\n16\n"), ("0\n", "worker A\nworker B\n0\n"), (),
+        task="用互斥锁保护共享计数的一次递增。",
     ),
     "memory": lab(
         "内存分配", "用 mmap 申请输入指定的字节数，逐页写入后用 munmap 释放。输入为 0 时映射 1 字节。输出输入值。",
@@ -121,6 +136,7 @@ LABS = {
         int main(void) {
             size_t bytes;
             if (scanf("%zu", &bytes) != 1) return 1;
+            /* practice:start */
             size_t length = bytes ? bytes : 1;
             volatile unsigned char *area = mmap(NULL, length, PROT_READ | PROT_WRITE,
                                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -128,6 +144,7 @@ LABS = {
             size_t page = (size_t)sysconf(_SC_PAGESIZE);
             for (size_t offset = 0; offset < bytes; offset += page) area[offset] = 1;
             if (munmap((void *)area, length) != 0) return 3;
+            /* practice:end */
             printf("%zu\n", bytes);
             return 0;
         }
@@ -135,6 +152,7 @@ LABS = {
         ("size_t length = bytes ? bytes : 1;",
          "bytes = 256 * 1024 * 1024;\n    size_t length = bytes;"),
         ("4194304\n", "4194304\n"), ("0\n", "0\n"), (),
+        task="映射匿名内存，逐页写入，再释放映射。",
     ),
     "schedule": lab(
         "轮转调度", "在用户态模拟两个任务的轮转，每轮每个未完成任务执行一个时间片，按顺序输出任务字母。",
@@ -146,6 +164,7 @@ LABS = {
             int remaining[2];
             if (scanf("%d%d", &remaining[0], &remaining[1]) != 2) return 1;
             if (remaining[0] < 0 || remaining[1] < 0) return 1;
+            /* practice:start */
             while (remaining[0] || remaining[1]) {
                 for (int i = 0; i < 2; ++i) {
                     if (remaining[i] == 0) continue;
@@ -154,12 +173,14 @@ LABS = {
                     sched_yield();
                 }
             }
+            /* practice:end */
             putchar('\n');
             return 0;
         }
         """,
         ("for (int i = 0; i < 2; ++i)", "for (int i = 1; i >= 0; --i)"),
         ("3 2\n", "ABABA\n"), ("0 2\n", "BB\n"), (),
+        task="按 A、B 顺序轮转，跳过已完成的任务，并输出每个时间片的任务。",
     ),
     "deadlock": lab(
         "死锁与锁顺序", "两个工作线程按相同的加锁顺序更新共享值，并各自用一次 write 输出 worker A 或 worker B（顺序不限）。主线程输出总和。",
@@ -174,11 +195,13 @@ LABS = {
 
         static void *worker(void *arg) {
             const char *marker = *(const char *)arg == 'A' ? "worker A\n" : "worker B\n";
+            /* practice:start */
             pthread_mutex_lock(&first);
             pthread_mutex_lock(&second);
             value += increment;
             pthread_mutex_unlock(&second);
             pthread_mutex_unlock(&first);
+            /* practice:end */
             if (write(STDOUT_FILENO, marker, 9) != 9) return (void *)1;
             return NULL;
         }
@@ -195,6 +218,7 @@ LABS = {
         """,
         ("pthread_mutex_lock(&second);", "pthread_mutex_lock(&first);  /* Self-deadlock */"),
         ("7\n", "worker A\nworker B\n14\n"), ("0\n", "worker A\nworker B\n0\n"), (),
+        task="用一致的加锁顺序保护共享值的更新，完成后释放两把锁。",
     ),
 }
 
