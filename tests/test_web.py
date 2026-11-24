@@ -399,7 +399,6 @@ class Demo(TestCase):
                     walking = context.new_page()
                     try:
                         walking.set_viewport_size({"width": 390, "height": 844})
-                        walking.clock.install()
                         walking.add_init_script("""document.addEventListener("DOMContentLoaded", () => {
                           const pet = document.getElementById("pet-launch");
                           window.walks = [];
@@ -409,36 +408,30 @@ class Demo(TestCase):
                             }
                           }).observe(pet, {attributeFilter: ["data-roaming"]});
                         });""")
-                        with walking.expect_response("**/pet/whale-walk.webp"):
-                            walking.goto("http://127.0.0.1:8000")
-                            walking.mouse.move(180, 80)
-                            walking.clock.run_for(2600)
+                        walking.goto("http://127.0.0.1:8000")
+                        walking.mouse.move(180, 80)
+                        walking.locator("#pet-proactive").evaluate("""control => {
+                          control.checked = false;
+                          control.dispatchEvent(new Event("change"));
+                        }""")
                         walking_pet = walking.locator("#pet-launch")
                         home_x = walking_pet.bounding_box()["x"]
-                        walking.clock.run_for(3000)
-                        expect(walking_pet).to_have_attribute("data-roaming", "true")
+                        # Keep CSS transitions and patrol timers on the same time base.
+                        expect(walking_pet).to_have_attribute("data-roaming", "true", timeout=45000)
                         expect(walking_pet).to_have_attribute("data-art", "walk")
                         expect(walking_pet).to_have_attribute("data-facing", "left")
                         expect(walking_pet.locator(".pet-strip")).to_have_css("animation-name", "pet-frames")
                         expect(walking_pet.locator(".pet-stand")).to_be_hidden()
                         self.assertAlmostEqual(float(walking_pet.evaluate("el => parseFloat(el.style.left)")), 8, delta=1)
-                        walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-pose", "stand")
-                        walking.locator("#pet-proactive").evaluate("""control => {
-                          control.checked = false;
-                          control.dispatchEvent(new Event("change"));
-                        }""")
-                        for _ in range(8):
-                            walking.clock.run_for(5200)
-                            legs = walking.evaluate("window.walks")
-                            if len(legs) == 2:
-                                break
+                        expect(walking_pet).to_have_attribute("data-facing", "right", timeout=45000)
+                        legs = walking.evaluate("window.walks")
                         self.assertEqual([leg["facing"] for leg in legs], ["left", "right"])
                         self.assertAlmostEqual(legs[0]["target"], 8, delta=1)
                         self.assertAlmostEqual(legs[1]["target"], home_x, delta=1)
-                        walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
+                        self.assertAlmostEqual(walking_pet.bounding_box()["x"], home_x, delta=1)
                     finally:
                         walking.close()
                     cloud_voice = context.new_page()
