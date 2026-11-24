@@ -425,11 +425,19 @@ class Demo(TestCase):
                         walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-pose", "stand")
-                        walking.clock.run_for(36100)
-                        legs = walking.evaluate("window.walks")
+                        walking.locator("#pet-proactive").evaluate("""control => {
+                          control.checked = false;
+                          control.dispatchEvent(new Event("change"));
+                        }""")
+                        for _ in range(8):
+                            walking.clock.run_for(5200)
+                            legs = walking.evaluate("window.walks")
+                            if len(legs) == 2:
+                                break
                         self.assertEqual([leg["facing"] for leg in legs], ["left", "right"])
                         self.assertAlmostEqual(legs[0]["target"], 8, delta=1)
                         self.assertAlmostEqual(legs[1]["target"], home_x, delta=1)
+                        walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                     finally:
                         walking.close()
