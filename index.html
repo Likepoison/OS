@@ -85,7 +85,6 @@ h1 { font-size: 40px; line-height: 1.2; letter-spacing: -.035em; }
 h2 { font-size: 22px; letter-spacing: -.015em; }
 h3 { font-size: 20px; }
 .intro { display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 12px; margin-bottom: 15px; }
-.intro p { color: var(--muted); margin-top: 5px; }
 .labbar { display: flex; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 15px; background: var(--paper); margin-bottom: 14px; }
 select, input[type="search"] { border: 1px solid var(--line); border-radius: 7px; background: var(--paper); padding: 7px 10px; }
 #summary { color: var(--muted); }
@@ -295,7 +294,7 @@ td code { font: 18px var(--mono); }
     <span class="quote-line"><span id="quote-text"></span><a id="quote-source" target="_blank" rel="noopener noreferrer"></a></span>
   </blockquote>
   <div class="header-tools">
-    <button type="button" class="button" id="demo-check-open">演示自检</button>
+    <button type="button" class="button" id="demo-check-open">系统自检</button>
     <button type="button" class="button" id="appearance-open">外观设置</button>
     <button type="button" class="button" id="pet-restore" hidden>显示助教</button>
   </div>
@@ -303,7 +302,7 @@ td code { font: 18px var(--mono); }
 <main>
 <section id="workspace" aria-labelledby="work-title">
   <div class="intro">
-    <div><h1 id="work-title">操作系统实验工作台</h1><p>从测试判定追溯到系统调用，逐层查看排查提示。</p></div>
+    <h1 id="work-title">操作系统实验工作台</h1>
     <div class="quick-study" id="quick-study" aria-label="助教学习工具" role="group">
       <button class="button" type="button" data-study="chat" disabled>问助教</button>
       <button class="button" type="button" data-study="voice" aria-keyshortcuts="T" disabled>语音提问</button>
@@ -316,7 +315,7 @@ td code { font: 18px var(--mono); }
   </div>
   <div class="grid">
     <section class="panel" aria-labelledby="code-title">
-      <div class="panel-head"><h2 id="code-title">源代码 <span class="muted">· main.c</span></h2>
+      <div class="panel-head"><h2 id="code-title">源代码 <span class="muted">· C</span></h2>
         <div class="tool-row"><button class="button" id="editor-open" type="button">代码样式</button><button class="button" id="good" type="button" disabled>正确样例</button></div>
       </div>
       <div class="editor"><pre id="numbers" aria-hidden="true">1</pre><textarea id="source" aria-label="C 源代码" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea></div>
@@ -348,7 +347,7 @@ td code { font: 18px var(--mono); }
 </section>
 </main>
 <dialog class="preferences" id="demo-check" aria-labelledby="demo-check-title">
-  <h2 id="demo-check-title">演示自检</h2>
+  <h2 id="demo-check-title">系统自检</h2>
   <label><input type="checkbox" id="demo-check-online"> 同时实测 Xiaoyi 和 DeepSeek</label>
   <div class="tool-row">
     <button class="button primary" id="demo-check-run" type="button">开始自检</button>

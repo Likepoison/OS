@@ -94,6 +94,8 @@ class Demo(TestCase):
                     page.reload()
                     expect(page).to_have_title("TraceTutor——操作系统实验评测与智能诊断平台")
                     expect(page.locator(".brand")).to_contain_text("TraceTutor")
+                    expect(page.get_by_role("heading", name="源代码 · C", exact=True)).to_be_visible()
+                    expect(page.get_by_text("从测试判定追溯到系统调用，逐层查看排查提示。", exact=True)).to_have_count(0)
                     run = page.get_by_role("button", name="运行实验")
                     expect(run).to_be_enabled()
                     source = page.locator("#source")
@@ -163,7 +165,7 @@ class Demo(TestCase):
                     options.get_by_role("button", name="完成").click()
                     pet = page.get_by_role("button", name="小助教", exact=True)
                     pet_panel = page.get_by_role("complementary", name="小助教", exact=True)
-                    pet_reply = pet_panel.locator("#pet-reply")
+                    pet_reply = page.locator("#pet-reply")
                     portrait = pet.locator(".pet-figure")
                     poster = portrait.locator(".pet-stand")
                     expect(poster).to_have_attribute("src", re.compile(r"^data:image/webp;base64,"))
@@ -205,7 +207,7 @@ class Demo(TestCase):
                     pet_panel.get_by_role("button", name="最后一个写端被关闭后").click()
                     expect(pet_reply).to_contain_text("答对啦")
                     voice = pet_panel.get_by_role("button", name="语音输入")
-                    prompt = pet_panel.get_by_role("textbox", name="问助教")
+                    prompt = page.locator("#pet-input")
                     auto_read = pet_panel.get_by_label("自动朗读")
                     expect(auto_read).to_be_checked()
                     auto_read.uncheck()
@@ -239,9 +241,11 @@ class Demo(TestCase):
                     self.assertTrue(spoken.value.post_data_json["text"].startswith("当前实验评测"))
                     self.assertIn("概念题答对 1/2 次", prefetched.value.post_data_json["text"])
                     expect(pet).to_have_attribute("data-pose", "talk")
-                    expect(pet_panel.locator("#pet-voice-status")).to_be_hidden()
+                    expect(page.locator("#pet-voice-status")).to_be_hidden()
                     text = spoken.value.post_data_json["text"]
                     expect(pet_bubble).to_have_attribute("data-kind", "spoken")
+                    expect(pet_panel).to_be_hidden()
+                    expect(pet).to_have_attribute("aria-expanded", "false")
                     expect(pet_bubble).to_have_text(text[:1])
                     cue = pet_bubble.bounding_box()
                     self.assertLess(cue["y"] + cue["height"], pet.bounding_box()["y"])
@@ -250,13 +254,16 @@ class Demo(TestCase):
                     page.evaluate("() => window.currentNarration.onended()")
                     expect(pet_bubble).to_have_text(text)
                     expect(pet).to_have_attribute("data-pose", "focus")
-                    remaining = re.findall(r"[^。！？!?]+[。！？!?]*|[。！？!?]+", pet_reply.inner_text())[1:]
+                    remaining = re.findall(r"[^。！？!?]+[。！？!?]*|[。！？!?]+", pet_reply.text_content())[1:]
                     for index, sentence in enumerate(remaining):
                         later_speech[index].fulfill(content_type="audio/mpeg", body=b"\xff\xfb")
                         expect(pet_bubble).to_have_text(text + sentence[:1])
                         page.evaluate("() => window.currentNarration.onended()")
                         text += sentence
                         expect(pet_bubble).to_have_text(text)
+                    expect(pet_panel).to_be_hidden()
+                    expect(pet_bubble).to_be_hidden(timeout=6000)
+                    expect(pet_panel).to_be_visible()
                     expect(pet_panel.get_by_role("button", name="朗读回复")).to_be_enabled()
                     defer_replay = True
                     with page.expect_request("**/api/pet/speech") as replay:
@@ -264,6 +271,23 @@ class Demo(TestCase):
                     self.assertEqual(replay.value.post_data_json["voice"], "xiaoyi")
                     expect(pet_bubble).to_be_hidden()
                     pet_panel.get_by_role("button", name="停止朗读").click()
+                    defer_replay = False
+                    pet_panel.get_by_role("button", name="收起").click()
+                    page.keyboard.down("t")
+                    expect(pet_bubble).to_contain_text("说完松开 T")
+                    expect(pet_panel).to_be_hidden()
+                    page.evaluate("""() => {
+                      window.currentDictation.onresult({resultIndex: 0, results: [[{transcript: "为什么超时"}]]});
+                      window.currentDictation.onend();
+                    }""")
+                    page.keyboard.up("t")
+                    expect(pet_bubble).to_have_attribute("data-kind", "spoken")
+                    expect(pet_panel).to_be_hidden()
+                    page.evaluate("() => window.currentNarration.onended()")
+                    expect(pet_bubble).to_contain_text("运行一次实验")
+                    expect(pet_bubble).to_be_hidden(timeout=6000)
+                    expect(pet_panel).to_be_hidden()
+                    pet.click()
                     pet_panel.get_by_label("自动朗读").uncheck()
                     voice.click()
                     page.evaluate("window.currentDictation.onerror({error:'not-allowed'})")
@@ -374,6 +398,7 @@ class Demo(TestCase):
                         mobile.close()
                     walking = context.new_page()
                     try:
+                        walking.set_viewport_size({"width": 390, "height": 844})
                         walking.clock.install()
                         with walking.expect_response("**/pet/whale-walk.webp"):
                             walking.goto("http://127.0.0.1:8000")
@@ -386,7 +411,7 @@ class Demo(TestCase):
                         expect(walking_pet).to_have_attribute("data-facing", "left")
                         expect(walking_pet.locator(".pet-strip")).to_have_css("animation-name", "pet-frames")
                         expect(walking_pet.locator(".pet-stand")).to_be_hidden()
-                        self.assertLess(float(walking_pet.evaluate("(el) => parseFloat(el.style.left)")), home_x - 40)
+                        self.assertAlmostEqual(float(walking_pet.evaluate("el => parseFloat(el.style.left)")), 8, delta=1)
                         walking.clock.run_for(2200)
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-pose", "stand")
@@ -394,6 +419,7 @@ class Demo(TestCase):
                         expect(walking_pet).to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-art", "walk")
                         expect(walking_pet).to_have_attribute("data-facing", "right")
+                        self.assertAlmostEqual(float(walking_pet.evaluate("el => parseFloat(el.style.left)")), home_x, delta=1)
                         walking.get_by_role("button", name="问助教").click()
                         expect(walking_pet).not_to_have_attribute("data-roaming", "true")
                         expect(walking_pet).to_have_attribute("data-pose", "stand")
@@ -470,16 +496,20 @@ class Demo(TestCase):
                         expect(cloud_voice.locator("#pet-panel")).to_be_hidden()
                         cloud_voice.keyboard.down("t")
                         stop = cloud_voice.get_by_role("button", name="结束并转写")
-                        expect(stop).to_be_visible()
+                        expect(cloud_voice.locator("#pet-mic")).to_have_text("结束并转写")
                         expect(cloud_voice.locator("#pet-launch")).to_have_attribute("data-pose", "listen")
+                        expect(cloud_voice.locator("#pet-panel")).to_be_hidden()
                         expect(cloud_voice.locator("#pet-panel meter")).to_have_count(0)
-                        expect(cloud_voice.locator("#pet-voice-status")).to_contain_text("录音")
+                        expect(cloud_voice.locator("#pet-bubble")).to_contain_text("说完松开 T")
                         # The fake microphone supplies real-time audio to MediaRecorder.
                         cloud_voice.wait_for_timeout(850)
                         cloud_voice.keyboard.down("t")
-                        expect(stop).to_be_visible()
+                        expect(cloud_voice.locator("#pet-mic")).to_have_text("结束并转写")
                         with cloud_voice.expect_request("**/api/pet/voice"):
                             cloud_voice.keyboard.up("t")
+                        expect(cloud_voice.locator("#pet-bubble")).to_contain_text("概念题答对 0/0 次")
+                        expect(cloud_voice.locator("#pet-panel")).to_be_hidden()
+                        cloud_voice.get_by_role("button", name="问助教", exact=True).click()
                         expect(cloud_prompt).to_have_value("")
                         expect(cloud_voice.locator("#pet-heard")).to_have_text(
                             "听到「我的学习进驻怎样」，按「我的学习进度怎样」理解。")
@@ -625,8 +655,8 @@ class Demo(TestCase):
                     page.get_by_role("button", name="诊断复盘", exact=True).click()
                     review.get_by_role("button", name="打开后一次运行").click(timeout=15000)
                     expect(page.locator("#status")).to_have_text("2 / 2 通过")
-                    page.get_by_role("button", name="演示自检", exact=True).click()
-                    demo = page.get_by_role("dialog", name="演示自检")
+                    page.get_by_role("button", name="系统自检", exact=True).click()
+                    demo = page.get_by_role("dialog", name="系统自检")
                     with page.expect_response("**/api/demo-check", timeout=45000) as health:
                         demo.get_by_role("button", name="开始自检").click()
                     checks = {check["name"]: check for check in health.value.json()["checks"]}

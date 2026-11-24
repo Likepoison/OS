@@ -54,7 +54,7 @@ function interpretSpeech(text, lab) {
   return question;
 }
 
-function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, canAsk) {
+function setupPetVoice(message, resize, setVoicePose, caption, showStatus, sendTranscript, canAsk) {
   const mic = byId("pet-mic"), read = byId("pet-read"), status = byId("pet-voice-status");
   const autoRead = byId("pet-autoread");
   const devices = byId("pet-mic-devices"), device = byId("pet-mic-device");
@@ -65,9 +65,10 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
   const canRecord = Boolean(window.isSecureContext && format && navigator.mediaDevices?.getUserMedia);
   let listener, timeout, recording, playback, pendingReply, preferredVoice, speechReady = false, useServer = false;
   let inputUpdate = 0;
-  function note(text = "") {
+  function note(text = "", showOnPage = true) {
     status.hidden = !text;
     status.textContent = text;
+    if (showOnPage) showStatus(text);
     resize();
   }
   function micState(label = "语音输入", pose = null) {
@@ -97,7 +98,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     if (configuration === undefined) {
       mic.disabled = true;
       mic.title = "正在检查语音服务";
-      note("语音服务正在准备。");
+      note("语音服务正在准备。", false);
       return;
     }
     useServer = configuration.record && canRecord;
@@ -106,8 +107,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     mic.disabled = !useServer && !Recognition;
     mic.title = useServer ? "按住 T 录音，松开转写。普通话在当前演示服务内转写"
       : Recognition ? "按住 T 录音，松开转写。使用浏览器语音识别" : "当前浏览器无法使用语音输入";
-    if (mic.disabled) note("当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。");
-    else note();
+    note(mic.disabled ? "当前浏览器可使用文字输入。也可以用 Chrome 或 Edge 打开演示页后重试。" : "", false);
     const waiting = pendingReply;
     pendingReply = undefined;
     if (waiting && waiting === message.textContent) readReply(true);
@@ -261,7 +261,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     }
   }
 
-  async function startServerRecording(held) {
+  async function startServerRecording(held, floating) {
     const session = recording = {request: new AbortController(), phase: "permission"};
     try {
       device.disabled = true;
@@ -296,7 +296,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
       recorder.start();
       session.phase = "listening";
       micState("结束并转写", "listen");
-      const instruction = held ? "说完松开 T" : "说完点「结束并转写」";
+      const instruction = held ? "说完松开 T" : floating ? "说完再点「语音提问」" : "说完点「结束并转写」";
       note("正在用「" + session.deviceName + "」录音。" + instruction + "后自动发送，最多 12 秒。");
       session.timer = setTimeout(() => finishRecording(session), 12000);
     } catch (error) {
@@ -313,7 +313,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
     }
   }
 
-  mic.addEventListener("click", () => {
+  function toggleInput(floating = false) {
     if (recording?.phase === "listening") return finishRecording(recording);
     if (closeRecording()) return note("已取消语音输入。");
     if (listener) {
@@ -321,15 +321,17 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
       else if (stopListening()) note("已取消语音输入。");
       return;
     }
-    startInput(false);
-  });
+    startInput(false, floating);
+  }
+  mic.addEventListener("click", () => toggleInput());
 
-  function startInput(held) {
+  function startInput(held, floating = false) {
     if (mic.disabled || recording || listener) return;
     if (!canAsk()) return note("上一条问题还在处理，请稍等。");
     stopPlayback();
+    caption();
     if (!useServer) return startNative(held);
-    startServerRecording(held);
+    startServerRecording(held, floating);
     const session = recording;
     if (!held || !session) return;
     return () => {
@@ -468,7 +470,7 @@ function setupPetVoice(message, resize, setVoicePose, caption, sendTranscript, c
   window.addEventListener("pagehide", stop);
   document.addEventListener("visibilitychange", () => { if (document.hidden) stop(); });
   enableServer();
-  return {stop, readReply, enableServer, startInput};
+  return {stop, readReply, enableServer, startInput, toggleInput};
 }
 
 function makeStudyMemory() {
@@ -539,7 +541,7 @@ function makeCompanion(activeLab, openResult) {
   const greeting = bubble.textContent;
   const figure = avatar.querySelector(".pet-figure");
   const readyArtwork = new Map(), artworkFailures = new Map();
-  const activities = [["walk", 2040], ["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
+  const activities = [["walk", 0], ["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
   let loadingArtwork, shownArtwork;
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
   let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
@@ -549,12 +551,12 @@ function makeCompanion(activeLab, openResult) {
   let view = "grade", visibleEvents, selectedEvent;
   const memory = makeStudyMemory(), memoryStatus = byId("pet-memory-status");
   let lastVisit;
-  let bubbleTimer;
+  let bubbleTimer, reopenAfterSpeech = false;
   const voice = setupPetVoice(message, () => place(panel), pose => {
     voicePose = pose;
     if (voicePose && voicePose !== "talk") cancelArtwork();
     updateAppearance();
-  }, showSpokenCaption, text => submitQuestion(text, true), () => !send.disabled);
+  }, showSpokenCaption, showVoiceStatus, text => submitQuestion(text, true), () => !send.disabled);
 
   function cancelArtwork() {
     if (!loadingArtwork) return;
@@ -638,34 +640,65 @@ function makeCompanion(activeLab, openResult) {
     return text;
   }
 
+  function setPanelVisible(visible) {
+    panel.hidden = !visible;
+    avatar.setAttribute("aria-expanded", String(visible));
+    if (visible) place(panel);
+  }
+
   function hideBubble() {
     clearTimeout(bubbleTimer);
     bubble.hidden = true;
+    delete bubble.dataset.kind;
+    if (reopenAfterSpeech) {
+      reopenAfterSpeech = false;
+      setPanelVisible(true);
+      if (!document.hidden && document.activeElement === avatar) byId("pet-title").focus({preventScroll: true});
+    }
+  }
+
+  function showVoiceStatus(text) {
+    if (!panel.hidden || avatar.hidden || document.hidden || bubble.dataset.kind === "spoken") return;
+    if (!text) {
+      if (bubble.dataset.kind === "voice") hideBubble();
+      return;
+    }
+    stopRoaming();
+    lastInteraction = performance.now();
+    hideBubble();
+    bubble.dataset.kind = "voice";
+    bubble.removeAttribute("aria-live");
+    bubble.textContent = text;
+    bubble.hidden = false;
+    place(bubble);
+    bubbleTimer = setTimeout(hideBubble, 6500);
   }
 
   function showSpokenCaption(text, finished = false) {
     if (!text) {
-      if (bubble.dataset.kind === "spoken") {
-        hideBubble();
-        place(panel);
-      }
+      if (bubble.dataset.kind === "spoken") hideBubble();
       return;
     }
-    if (avatar.hidden || document.hidden || panel.hidden) return;
+    if (avatar.hidden || document.hidden) return;
     if (bubble.hidden || bubble.dataset.kind !== "spoken") {
       hideBubble();
+      reopenAfterSpeech = !panel.hidden;
+      if (reopenAfterSpeech) {
+        if (panel.contains(document.activeElement)) avatar.focus({preventScroll: true});
+        setPanelVisible(false);
+      }
       bubble.dataset.kind = "spoken";
       bubble.setAttribute("aria-live", "off");
       bubble.hidden = false;
     }
     bubble.textContent = text;
     place(bubble);
-    place(panel);
-    if (finished) bubbleTimer = setTimeout(() => { hideBubble(); place(panel); }, 3200);
+    if (finished) bubbleTimer = setTimeout(hideBubble, 3200);
   }
 
   function announce(text = message.textContent, kind = "reply") {
-    if (!text || !proactive.checked || avatar.hidden || !panel.hidden) return false;
+    if (!text || !proactive.checked || avatar.hidden || !panel.hidden || voicePose ||
+        bubble.dataset.kind === "spoken" || bubble.dataset.kind === "voice") return false;
     if (document.hidden || byId("appearance").open || byId("editor-settings").open) {
       pendingBubble = text;
       return false;
@@ -771,8 +804,9 @@ function makeCompanion(activeLab, openResult) {
   }
 
   function patrol() {
-    if (document.hidden || avatar.hidden || !panel.hidden || drag || hoverActive ||
-      byId("appearance").open || byId("editor-settings").open) return;
+    if (document.hidden || avatar.hidden || !panel.hidden || drag || hoverActive || voicePose ||
+        avatar.dataset.roaming || bubble.dataset.kind === "spoken" || bubble.dataset.kind === "voice" ||
+        byId("appearance").open || byId("editor-settings").open) return;
     if (!greeted) greet();
     if (pendingBubble && greeted) announce(pendingBubble);
     const idle = performance.now() - lastInteraction;
@@ -800,16 +834,25 @@ function makeCompanion(activeLab, openResult) {
     }
     if (!bubble.hidden) hideBubble();
     const style = getComputedStyle(avatar);
-    const homeX = innerWidth - avatar.offsetWidth - parseFloat(style.getPropertyValue("--pet-edge"));
-    const homeY = innerHeight - avatar.offsetHeight - parseFloat(style.getPropertyValue("--pet-bottom"));
+    const edge = Math.max(8, parseFloat(style.getPropertyValue("--pet-edge")));
+    const right = innerWidth - avatar.offsetWidth - edge;
+    const bottom = innerHeight - avatar.offsetHeight - parseFloat(style.getPropertyValue("--pet-bottom"));
+    const left = avatar.getBoundingClientRect().left;
+    const target = roamingLeft ? right : edge;
+    const distance = Math.abs(target - left);
+    if (distance < 1) {
+      roamingLeft = !roamingLeft;
+      return;
+    }
     roamingLeft = !roamingLeft;
-    avatar.dataset.facing = roamingLeft ? "left" : "right";
-    // Play three complete stride cycles and settle when the horizontal transition ends.
-    avatar.style.setProperty("--roam-duration", duration + "ms");
+    avatar.dataset.facing = target < left ? "left" : "right";
+    // Keep the speed similar on narrow and wide displays, with full stride cycles.
+    const travelTime = Math.max(1, Math.round(distance / 110)) * 680;
+    avatar.style.setProperty("--roam-duration", travelTime + "ms");
     setPose("walk");
     avatar.dataset.roaming = "true";
-    move(homeX - (roamingLeft ? Math.min(330, innerWidth * .26) : 0), homeY);
-    roamTimeout = setTimeout(finishRoaming, duration + 100);
+    move(target, bottom);
+    roamTimeout = setTimeout(finishRoaming, travelTime + 100);
   }
   function startPatrol() {
     clearInterval(patrolTimer);
@@ -818,18 +861,15 @@ function makeCompanion(activeLab, openResult) {
 
   function setOpen(open, focus = true) {
     stopRoaming();
-    updateAppearance();
-    panel.hidden = !open;
-    avatar.setAttribute("aria-expanded", String(open));
-    if (open) {
-      hideBubble();
-      place(panel);
-      if (focus) byId("pet-title").focus();
-    } else {
+    reopenAfterSpeech = false;
+    if (!open || bubble.dataset.kind === "spoken") {
       clearVoiceHold();
       voice.stop();
-      if (focus && !avatar.hidden) avatar.focus();
     }
+    hideBubble();
+    setPanelVisible(open);
+    updateAppearance();
+    if (focus && !avatar.hidden) (open ? byId("pet-title") : avatar).focus();
   }
 
   function reveal(kind) {
@@ -837,15 +877,15 @@ function makeCompanion(activeLab, openResult) {
     openResult(activeRun.id, kind);
   }
 
-  async function showQuiz() {
+  async function showQuiz(spoken = false) {
     const lab = activeLab();
     const lesson = petLessons[lab];
     if (!lesson) return speak("选择一个实验，我就能给你出一道相关的小题。");
     const status = (await readMemory(lab))?.study;
-    if (panel.hidden || lab !== activeLab()) return;
+    if ((panel.hidden && !spoken) || lab !== activeLab() || avatar.hidden) return;
     const [question, options, correct, explanation] = lesson;
-    const reply = speak(status && status.answers > status.correct
-      ? "再用一道概念题确认刚才的知识点。可以回看系统调用后再答。"
+    const reply = speak(panel.hidden ? question + "打开小助教面板后可以选答案。"
+      : status && status.answers > status.correct ? "再用一道概念题确认刚才的知识点。可以回看系统调用后再答。"
       : "来做一道概念题。答错了也可以再试。");
     byId("pet-question").textContent = question;
     choices.replaceChildren(...options.map((option, i) => button(option, () => {
@@ -860,7 +900,7 @@ function makeCompanion(activeLab, openResult) {
       }
     })));
     quiz.hidden = false;
-    choices.firstElementChild.focus();
+    if (!panel.hidden) choices.firstElementChild.focus();
     place(panel);
     return reply;
   }
@@ -970,7 +1010,7 @@ function makeCompanion(activeLab, openResult) {
       return event ? explainSelected(event) : explainView();
     }
     if (/正在看|在看什么|当前页面|这页|这条|这个调用|刚才那条/.test(text)) return explainView();
-    if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz();
+    if (/小测|测试题|练习|出.*题|quiz/i.test(text)) return showQuiz(spoken);
     if (spoken && /文件描述符/.test(text)) {
       return speak("文件描述符是进程引用已打开文件或管道端的编号。可以用它把轨迹里的读、写和关闭操作串起来。");
     }
@@ -999,7 +1039,7 @@ function makeCompanion(activeLab, openResult) {
     if (key === lastUpdate) return;
     lastUpdate = key;
     activeRun = run;
-    const contextButtons = [button("来道小测", showQuiz), button("学习进度", reportProgress), button("本轮回顾", recap)];
+    const contextButtons = [button("来道小测", () => showQuiz()), button("学习进度", reportProgress), button("本轮回顾", recap)];
     contextButtons[0].id = "pet-quiz-start";
     if (run?.hasResult) {
       if (run.traceLabel) contextButtons.push(button(run.traceLabel, () => reveal("trace")));
@@ -1131,7 +1171,7 @@ function makeCompanion(activeLab, openResult) {
     lastInteraction = performance.now();
     if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || document.querySelector("dialog[open]")) return;
     if (event.key === "Escape") {
-      if (!panel.hidden) setOpen(false);
+      if (!panel.hidden || voicePose || bubble.dataset.kind === "spoken") setOpen(false);
       else cancelVoiceHold();
       return;
     }
@@ -1141,7 +1181,6 @@ function makeCompanion(activeLab, openResult) {
     holdTimer = setTimeout(() => {
       holdTimer = undefined;
       if (!canHoldVoice()) return;
-      if (panel.hidden) setOpen(true, false);
       releaseVoice = voice.startInput(true);
     }, 300);
   });
@@ -1162,8 +1201,8 @@ function makeCompanion(activeLab, openResult) {
     }
   });
   proactive.addEventListener("change", () => {
-    if (!proactive.checked) hideBubble();
-    else if (!greeted) greet();
+    if (!proactive.checked && (bubble.dataset.kind === "welcome" || bubble.dataset.kind === "reply")) hideBubble();
+    else if (proactive.checked && !greeted) greet();
   });
   reducedMotion.addEventListener("change", () => {
     if (reducedMotion.matches && !manuallyPlaced) goHome();
@@ -1171,9 +1210,9 @@ function makeCompanion(activeLab, openResult) {
   quickStudy.addEventListener("click", event => {
     const action = event.target.closest("[data-study]")?.dataset.study;
     if (!action) return;
+    if (action === "voice") return voice.toggleInput(panel.hidden);
     setOpen(true);
     if (action === "chat") input.focus();
-    else if (action === "voice") byId("pet-mic").click();
     else if (action === "quiz") showQuiz();
     else reportProgress();
   });
@@ -1219,11 +1258,13 @@ function makeCompanion(activeLab, openResult) {
     message.textContent = "正在回复…";
     try {
       const reply = await respond(question, spoken);
-      if (!panel.hidden) voice.readReply(true);
+      if (spoken && panel.hidden) showVoiceStatus(reply || message.textContent);
+      if (!panel.hidden || spoken) voice.readReply(true);
       remember({type: "question", question: text, reply: reply || message.textContent, recap: recallQuestion.test(question)});
     } catch (error) {
       if (!spoken && !input.value) input.value = text;
-      speak("这次没能回复，请再试一次。");
+      const reply = speak("这次没能回复，请再试一次。");
+      if (spoken) showVoiceStatus(reply);
       showMemoryStatus(error.message);
     } finally {
       send.disabled = false;

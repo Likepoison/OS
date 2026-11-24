@@ -222,7 +222,7 @@ def demo_checks(online):
     elif not evidence:
         report("DeepSeek 提示", "pending", "需要先取得真实探针轨迹，再验证模型引用。")
     else:
-        diagnosis = {"code": "probe", "title": "演示自检：使用 write 输出固定文本",
+        diagnosis = {"code": "probe", "title": "系统自检：使用 write 输出固定文本",
                      "confidence": "confirmed", "evidence": [evidence["id"]],
                      "hints": ["哪个调用向标准输出写入数据？", "调用的返回值说明了什么？", "可以用哪条轨迹核对写入？"]}
         reply = ai_hints("pipe", diagnosis, [evidence])
@@ -453,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, AttributeError, TimeoutError, RecursionError):
                 return self.send_data(400, {"error": "检查选项格式无效。"})
             if not CHECK_SLOT.acquire(blocking=False):
-                return self.send_data(429, {"error": "演示自检正在运行，请稍后重试。"})
+                return self.send_data(429, {"error": "系统自检正在运行，请稍后重试。"})
             try:
                 return self.send_data(200, demo_checks(online))
             finally:
