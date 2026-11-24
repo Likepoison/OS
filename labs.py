@@ -7,7 +7,7 @@ def lab(title, summary, source, fault, normal, boundary, required, *, task):
     markers = [line.strip() for line in lines]
     start = markers.index("/* practice:start */")
     end = markers.index("/* practice:end */", start + 1)
-    prompt = lines[start].replace("practice:start", f"请填写：{task}")
+    prompt = lines[start].replace("practice:start", task)
     return {
         "title": title, "summary": summary, "required": required,
         "starter": "".join([*lines[:start], prompt, *lines[end + 1:]]),

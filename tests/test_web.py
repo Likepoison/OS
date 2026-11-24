@@ -31,7 +31,7 @@ class Demo(TestCase):
                             labs = json.load(rs)["labs"]
                             self.assertEqual(len(labs), 6)
                             for lab in labs:
-                                self.assertIn("请填写", lab["starter"])
+                                self.assertNotIn("请填写：", lab["starter"])
                                 self.assertNotIn("sample", lab)
                                 self.assertNotIn("broken", lab)
                         break
@@ -331,6 +331,7 @@ class Demo(TestCase):
                         mobile.set_viewport_size({"width": 390, "height": 844})
                         mobile.clock.install()
                         mobile.add_init_script("""
+                            Math.random = () => 0;
                             let hiddenTab = true;
                             Object.defineProperty(document, "hidden", {get: () => hiddenTab});
                             window.showTraceTab = () => {
@@ -340,6 +341,8 @@ class Demo(TestCase):
                         """)
                         pending_script = []
                         pending_art = []
+                        pending_walk = []
+                        mobile.route("**/pet/whale-walk.webp", lambda route: pending_walk.append(route))
                         mobile.route("**/pet/companion.js", lambda route: pending_script.append(route))
                         mobile.route("**/pet/whale-greet.webp", lambda route: pending_art.append(route))
                         with mobile.expect_request("**/pet/companion.js"):
@@ -368,8 +371,6 @@ class Demo(TestCase):
                             "(nodes) => nodes[1].getBoundingClientRect().top > nodes[0].getBoundingClientRect().bottom"))
                         mobile.mouse.move(20, 120)
                         home = mobile_pet.bounding_box()["x"]
-                        pending_walk = []
-                        mobile.route("**/pet/whale-walk.webp", lambda route: pending_walk.append(route))
                         with mobile.expect_request("**/pet/whale-walk.webp"):
                             mobile.clock.run_for(5700)
                         expect(mobile_pet).not_to_have_attribute("data-roaming", "true")
@@ -377,7 +378,6 @@ class Demo(TestCase):
                         expect(mobile_pet.locator(".pet-strip")).to_have_count(0)
                         self.assertAlmostEqual(mobile_pet.bounding_box()["x"], home, delta=1)
                         pending_walk[0].fulfill(content_type="image/webp", body=b"invalid sprite")
-                        mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "look")
                         mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "sit")
@@ -387,6 +387,10 @@ class Demo(TestCase):
                         expect(mobile_pet).to_have_attribute("data-pose", "play")
                         mobile.clock.run_for(5200)
                         expect(mobile_pet).to_have_attribute("data-pose", "sleep")
+                        mobile.locator("#pet-proactive").evaluate("control => { control.checked = false; }")
+                        mobile.clock.fast_forward(300000)
+                        expect(mobile_pet).not_to_have_attribute("data-roaming", "true")
+                        self.assertAlmostEqual(mobile_pet.bounding_box()["x"], home, delta=1)
                         mobile.get_by_role("button", name="外观设置").click()
                         mobile.get_by_label("小助教自由活动").uncheck()
                         mobile.get_by_label("小助教主动气泡").uncheck()
@@ -399,39 +403,54 @@ class Demo(TestCase):
                     walking = context.new_page()
                     try:
                         walking.set_viewport_size({"width": 390, "height": 844})
-                        walking.add_init_script("""document.addEventListener("DOMContentLoaded", () => {
-                          const pet = document.getElementById("pet-launch");
-                          window.walks = [];
-                          new MutationObserver(() => {
-                            if (pet.dataset.roaming === "true" && pet.dataset.art === "walk") {
-                              window.walks.push({facing: pet.dataset.facing, target: parseFloat(pet.style.left)});
-                            }
-                          }).observe(pet, {attributeFilter: ["data-roaming"]});
-                        });""")
-                        walking.goto("http://127.0.0.1:8000")
-                        walking.mouse.move(180, 80)
+                        walking.clock.install()
+                        walking.add_init_script("""
+                          window.nextStride = 0;
+                          Math.random = () => {
+                            const value = window.nextStride;
+                            window.nextStride = 0;
+                            return value;
+                          };
+                        """)
+                        with walking.expect_response("**/pet/whale-walk.webp") as artwork:
+                            walking.goto("http://127.0.0.1:8000")
+                            walking.mouse.move(180, 80)
+                            walking.clock.run_for(2400)
+                        artwork.value.finished()
                         walking.locator("#pet-proactive").evaluate("""control => {
                           control.checked = false;
                           control.dispatchEvent(new Event("change"));
                         }""")
-                        walking_pet = walking.locator("#pet-launch")
-                        home_x = walking_pet.bounding_box()["x"]
-                        # Keep CSS transitions and patrol timers on the same time base.
-                        expect(walking_pet).to_have_attribute("data-roaming", "true", timeout=45000)
-                        expect(walking_pet).to_have_attribute("data-art", "walk")
-                        expect(walking_pet).to_have_attribute("data-facing", "left")
-                        expect(walking_pet.locator(".pet-strip")).to_have_css("animation-name", "pet-frames")
-                        expect(walking_pet.locator(".pet-stand")).to_be_hidden()
-                        self.assertAlmostEqual(float(walking_pet.evaluate("el => parseFloat(el.style.left)")), 8, delta=1)
-                        expect(walking_pet).not_to_have_attribute("data-roaming", "true")
-                        expect(walking_pet).to_have_attribute("data-pose", "stand")
-                        expect(walking_pet).to_have_attribute("data-facing", "right", timeout=45000)
-                        legs = walking.evaluate("window.walks")
-                        self.assertEqual([leg["facing"] for leg in legs], ["left", "right"])
-                        self.assertAlmostEqual(legs[0]["target"], 8, delta=1)
-                        self.assertAlmostEqual(legs[1]["target"], home_x, delta=1)
-                        expect(walking_pet).not_to_have_attribute("data-roaming", "true")
-                        self.assertAlmostEqual(walking_pet.bounding_box()["x"], home_x, delta=1)
+                        walker = walking.locator("#pet-launch")
+                        home = walker.bounding_box()["x"]
+                        walking.clock.fast_forward(290000)
+                        expect(walker).not_to_have_attribute("data-roaming", "true")
+                        self.assertAlmostEqual(walker.bounding_box()["x"], home, delta=1)
+                        walking.clock.fast_forward(12000)
+                        expect(walker).to_have_attribute("data-roaming", "true")
+                        expect(walker).to_have_attribute("data-art", "walk")
+                        expect(walker).to_have_attribute("data-facing", "left")
+                        expect(walker.locator(".pet-strip")).to_have_css("animation-duration", "0.82s")
+                        partial = walker.evaluate("pet => parseFloat(pet.style.left)")
+                        self.assertGreater(partial, 8)
+                        self.assertLess(partial, home - 10)
+                        expect(walker).not_to_have_attribute("data-roaming", "true", timeout=14000)
+                        expect(walker).to_have_attribute("data-facing", "left")
+                        self.assertAlmostEqual(walker.bounding_box()["x"], partial, delta=1)
+
+                        for x, facing, turned in [(8, "left", "right"), (home, "right", "left")]:
+                            walking.clock.fast_forward(280000)
+                            expect(walker).not_to_have_attribute("data-roaming", "true")
+                            walking.evaluate("window.nextStride = 0.95")
+                            walking.clock.fast_forward(24000)
+                            expect(walker).to_have_attribute("data-roaming", "true")
+                            expect(walker).to_have_attribute("data-art", "walk")
+                            expect(walker).to_have_attribute("data-facing", facing)
+                            self.assertAlmostEqual(walker.evaluate("pet => parseFloat(pet.style.left)"), x, delta=1)
+                            expect(walker).not_to_have_attribute("data-roaming", "true", timeout=15000)
+                            expect(walker).to_have_attribute("data-facing", facing)
+                            expect(walker).to_have_attribute("data-facing", turned, timeout=6000)
+                            self.assertAlmostEqual(walker.bounding_box()["x"], x, delta=1)
                     finally:
                         walking.close()
                     cloud_voice = context.new_page()
@@ -563,7 +582,7 @@ class Demo(TestCase):
                         page.screenshot(path=f"{out}/workspace.png", full_page=True)
 
                     wrong_source = pipe_starter.replace(
-                        "/* 请填写：关闭父进程不使用的管道端，使读取有机会收到 EOF。 */",
+                        "/* 关闭父进程不使用的管道端，使读取有机会收到 EOF。 */",
                         "/* 遗漏了关闭操作 */",
                     )
                     self.assertNotEqual(wrong_source, pipe_starter)
@@ -592,6 +611,9 @@ class Demo(TestCase):
                     page.unroute("**/api/runs")
                     run_id = submitted.value.json()["id"]
                     expect(page.get_by_role("heading", name="疑似在等待管道 EOF")).to_be_visible(timeout=30000)
+                    expect(page.locator("#status")).to_have_text("0 / 2 通过")
+                    expect(page.get_by_text("超时前的输出", exact=True).first).to_be_visible()
+                    expect(page.get_by_text("程序未在时限内退出，本用例未通过。", exact=True).first).to_be_visible()
                     expect(pet).to_have_attribute("data-mood", "review")
                     expect(pet_bubble).to_contain_text("有运行线索")
                     pet.click()

@@ -190,7 +190,7 @@ td code { font: 18px var(--mono); }
 .pet-launch[data-art] .pet-stand { visibility: hidden; }
 .pet-launch[data-facing="left"] .pet-figure { transform: scaleX(-1); }
 .pet-launch[data-pose="greet"] .pet-figure { --cycle: 1.4s; }
-.pet-launch[data-pose="walk"] .pet-figure { --cycle: .68s; }
+.pet-launch[data-pose="walk"] .pet-figure { --cycle: var(--walk-cycle); }
 .pet-launch[data-pose="listen"] .pet-figure { --cycle: 1.8s; }
 .pet-launch[data-pose="talk"] .pet-figure { --cycle: .95s; }
 .pet-launch[data-pose="sit"] .pet-figure { --cycle: 2.5s; }
@@ -677,7 +677,9 @@ function render(initialTracePage = 0, traceFocus) {
       if (test.stdin !== undefined) details.append(el("p", "用例输入", "muted"), el("pre", test.stdin || "（空输入）"));
       const expectedLabel = ["mutex", "deadlock"].includes(record.lab) ? "预期输出（工作线程行顺序不限）" : "预期输出";
       details.append(el("p", expectedLabel, "muted"), el("pre", test.expected || "（空输出）"));
-      details.append(el("p", "实际输出", "muted"), el("pre", test.stdout || "（空输出）"));
+      const timedOut = test.status === "timeout";
+      details.append(el("p", timedOut ? "超时前的输出" : "实际输出", "muted"), el("pre", test.stdout || "（空输出）"));
+      if (timedOut) details.append(el("p", "程序未在时限内退出，本用例未通过。", "muted"));
       if (test.stderr) details.append(el("pre", test.stderr));
     }
     contents.append(details);

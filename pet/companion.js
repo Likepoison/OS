@@ -541,10 +541,14 @@ function makeCompanion(activeLab, openResult) {
   const greeting = bubble.textContent;
   const figure = avatar.querySelector(".pet-figure");
   const readyArtwork = new Map(), artworkFailures = new Map();
-  const activities = [["walk", 0], ["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
+  const activities = [["look", 2000], ["sit", 4300], ["snack", 2150], ["play", 1050], ["sleep", 4050]];
+  const walkCycle = 820;
+  avatar.style.setProperty("--walk-cycle", walkCycle + "ms");
+  const walkDelay = () => (5 + 5 * Math.random()) * 60_000;
+  let nextWalkAt = performance.now() + walkDelay(), turnTimer;
   let loadingArtwork, shownArtwork;
   let activeRun, lastUpdate, mood = "idle", drag, moved = false, position;
-  let manuallyPlaced = false, roamingLeft = false, patrolTimer, roamTimeout;
+  let manuallyPlaced = false, walkDirection = -1, turnOnArrival = false, patrolTimer, roamTimeout;
   let poseTimer, voicePose, greeted = false, pendingBubble, activityIndex = 0, hoverIndex = 0;
   let hoverActive = false;
   let lastInteraction = performance.now();
@@ -581,7 +585,10 @@ function makeCompanion(activeLab, openResult) {
     shownArtwork?.remove();
     shownArtwork = undefined;
     if (pose !== "stand") loadArtwork(pose);
-    else if (greeted && panel.hidden) loadArtwork(activities[activityIndex % activities.length][0]);
+    else if (greeted && panel.hidden) {
+      const preloadWalk = !readyArtwork.has("walk") && (artworkFailures.get("walk") || 0) < 2;
+      loadArtwork(preloadWalk ? "walk" : activities[activityIndex % activities.length][0]);
+    }
   }
 
   function loadArtwork(pose) {
@@ -786,6 +793,12 @@ function makeCompanion(activeLab, openResult) {
   function finishRoaming() {
     clearRoaming();
     updateAppearance();
+    if (turnOnArrival) {
+      turnTimer = setTimeout(() => {
+        walkDirection *= -1;
+        avatar.dataset.facing = walkDirection < 0 ? "left" : "right";
+      }, 2100);
+    }
   }
 
   avatar.addEventListener("transitionend", event => {
@@ -794,8 +807,10 @@ function makeCompanion(activeLab, openResult) {
 
   function goHome() {
     stopRoaming();
+    clearTimeout(turnTimer);
     position = undefined;
-    manuallyPlaced = roamingLeft = false;
+    manuallyPlaced = false;
+    walkDirection = -1;
     avatar.dataset.facing = "left";
     for (const side of ["left", "top"]) avatar.style.removeProperty(side);
     reset.hidden = true;
@@ -809,7 +824,15 @@ function makeCompanion(activeLab, openResult) {
         byId("appearance").open || byId("editor-settings").open) return;
     if (!greeted) greet();
     if (pendingBubble && greeted) announce(pendingBubble);
-    const idle = performance.now() - lastInteraction;
+    const now = performance.now();
+    const idle = now - lastInteraction;
+    const canAnimate = motion.checked && !reducedMotion.matches && mood !== "working" &&
+      (bubble.hidden || bubble.dataset.kind === "welcome");
+    if (canAnimate && now >= nextWalkAt && !manuallyPlaced && idle > 1100 &&
+        !avatar.matches(":hover, :focus-visible")) {
+      if (readyArtwork.has("walk") && walkAcross(now)) return;
+      loadArtwork("walk");
+    }
     if (proactive.checked && idle > 38000 && mood !== "working") {
       const lab = activeLab();
       if (lab) {
@@ -820,39 +843,42 @@ function makeCompanion(activeLab, openResult) {
       }
       return;
     }
-    if (!motion.checked || reducedMotion.matches || mood === "working" ||
-      (!bubble.hidden && bubble.dataset.kind !== "welcome")) return;
+    if (!canAnimate) return;
     const [action, duration] = activities[activityIndex++ % activities.length];
-    const canWalk = !manuallyPlaced && !avatar.matches(":hover, :focus-visible") && idle > 1100;
-    if (action !== "walk" || !canWalk) {
-      setPose(action === "walk" ? "look" : action, duration);
-      return;
-    }
-    if (!readyArtwork.has("walk")) {
-      loadArtwork("walk");
-      return;
-    }
-    if (!bubble.hidden) hideBubble();
+    setPose(action, duration);
+  }
+
+  function walkAcross(now) {
     const style = getComputedStyle(avatar);
     const edge = Math.max(8, parseFloat(style.getPropertyValue("--pet-edge")));
     const right = innerWidth - avatar.offsetWidth - edge;
     const bottom = innerHeight - avatar.offsetHeight - parseFloat(style.getPropertyValue("--pet-bottom"));
-    const left = avatar.getBoundingClientRect().left;
-    const target = roamingLeft ? right : edge;
-    const distance = Math.abs(target - left);
-    if (distance < 1) {
-      roamingLeft = !roamingLeft;
-      return;
+    const span = right - edge;
+    if (span < 1) return false;
+    const left = position?.x ?? avatar.getBoundingClientRect().left;
+    let limit = walkDirection < 0 ? edge : right;
+    if (Math.abs(limit - left) < 1) {
+      walkDirection *= -1;
+      limit = walkDirection < 0 ? edge : right;
     }
-    roamingLeft = !roamingLeft;
-    avatar.dataset.facing = target < left ? "left" : "right";
-    // Keep the speed similar on narrow and wide displays, with full stride cycles.
-    const travelTime = Math.max(1, Math.round(distance / 110)) * 680;
+    const remaining = Math.abs(limit - left);
+    const requested = span * (.25 + Math.random());
+    turnOnArrival = requested >= remaining;
+    const distance = Math.min(requested, remaining);
+    const target = turnOnArrival ? limit : left + walkDirection * distance;
+    clearTimeout(turnTimer);
+    if (!bubble.hidden) hideBubble();
+    avatar.dataset.facing = walkDirection < 0 ? "left" : "right";
+    // Match the travel to the sprite's short steps at its rendered size.
+    const stride = avatar.offsetWidth * .26;
+    const travelTime = Math.max(1, Math.round(distance / stride)) * walkCycle;
+    nextWalkAt = now + travelTime + walkDelay();
     avatar.style.setProperty("--roam-duration", travelTime + "ms");
     setPose("walk");
     avatar.dataset.roaming = "true";
     move(target, bottom);
     roamTimeout = setTimeout(finishRoaming, travelTime + 100);
+    return true;
   }
   function startPatrol() {
     clearInterval(patrolTimer);
